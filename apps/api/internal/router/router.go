@@ -98,6 +98,15 @@ func New(h *handlers.Handler, iss *auth.Issuer) http.Handler {
 			r.Get("/channels/{channelID}/pins", h.ListPins)
 			r.Put("/messages/{messageID}/pin", h.PinMessage)
 			r.Delete("/messages/{messageID}/pin", h.UnpinMessage)
+
+			// P0 yeni endpoint'ler
+			r.Patch("/users/me", h.UpdateMe)
+			r.Patch("/guilds/{id}", h.UpdateGuild)
+			r.Delete("/guilds/{id}", h.DeleteGuild)
+			r.Post("/guilds/{id}/leave", h.LeaveGuild)
+			r.Patch("/channels/{channelID}", h.UpdateChannel)
+			r.Delete("/channels/{channelID}", h.DeleteChannel)
+			r.Get("/guilds/{id}/audit-log", h.ListAuditLogs)
 		})
 	})
 

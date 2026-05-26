@@ -16,6 +16,7 @@ import (
 
 type createMessageReq struct {
 	Content     string                  `json:"content"`
+	RepliedToID string                  `json:"replied_to_id,omitempty"`
 	Attachments []createAttachmentInput `json:"attachments,omitempty"`
 }
 
@@ -74,14 +75,50 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "missing_permission", "bu kanala mesaj atma izni yok")
 			return
 		}
+
+		// Slowmode enforcement (ManageMessages izni varsa muaf)
+		if ch.RateLimitSec > 0 && !perms.Has(chanPerms, perms.ManageMessages) {
+			var lastAt *time.Time
+			err := h.Pool.QueryRow(r.Context(), `
+                SELECT last_at FROM channel_user_throttle WHERE channel_id = $1 AND user_id = $2
+            `, ch.ID, uid).Scan(&lastAt)
+			if err == nil && lastAt != nil {
+				elapsed := time.Since(*lastAt).Seconds()
+				remaining := float64(ch.RateLimitSec) - elapsed
+				if remaining > 0 {
+					w.Header().Set("Retry-After", strconv.Itoa(int(remaining)+1))
+					writeError(w, http.StatusTooManyRequests, "slowmode",
+						"bu kanalda yavaş modu açık; "+strconv.Itoa(int(remaining)+1)+" sn sonra tekrar dene")
+					return
+				}
+			}
+			_, _ = h.Pool.Exec(r.Context(), `
+                INSERT INTO channel_user_throttle (channel_id, user_id, last_at)
+                VALUES ($1, $2, NOW())
+                ON CONFLICT (channel_id, user_id) DO UPDATE SET last_at = NOW()
+            `, ch.ID, uid)
+		}
+	}
+
+	// Reply parent kontrolü
+	var repliedToID *int64
+	if req.RepliedToID != "" {
+		rid, err := strconv.ParseInt(req.RepliedToID, 10, 64)
+		if err == nil {
+			parent, perr := h.Messages.ByID(r.Context(), rid)
+			if perr == nil && parent.ChannelID == channelID {
+				repliedToID = &rid
+			}
+		}
 	}
 
 	m := &repo.Message{
-		ID:        h.IDs.Next(),
-		ChannelID: channelID,
-		AuthorID:  uid,
-		Content:   req.Content,
-		CreatedAt: time.Now(),
+		ID:          h.IDs.Next(),
+		ChannelID:   channelID,
+		AuthorID:    uid,
+		Content:     req.Content,
+		CreatedAt:   time.Now(),
+		RepliedToID: repliedToID,
 	}
 	if err := h.Messages.Create(r.Context(), m); err != nil {
 		h.logger.Error("message create", zap.Error(err))

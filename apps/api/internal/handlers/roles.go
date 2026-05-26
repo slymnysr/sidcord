@@ -89,6 +89,8 @@ func (h *Handler) CreateRole(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "rol oluşturulamadı")
 		return
 	}
+	h.Events.ToGuild(r.Context(), guildID, "GUILD_ROLE_CREATE", map[string]any{"role": role})
+	h.logAudit(r.Context(), guildID, uid, &role.ID, "role_create", "", map[string]string{"name": role.Name})
 	writeJSON(w, http.StatusCreated, role)
 }
 
@@ -151,6 +153,8 @@ func (h *Handler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "rol güncellenemedi")
 		return
 	}
+	h.Events.ToGuild(r.Context(), role.GuildID, "GUILD_ROLE_UPDATE", map[string]any{"role": role})
+	h.logAudit(r.Context(), role.GuildID, uid, &role.ID, "role_update", "", nil)
 	writeJSON(w, http.StatusOK, role)
 }
 
@@ -177,6 +181,8 @@ func (h *Handler) DeleteRole(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "rol silinemedi")
 		return
 	}
+	h.Events.ToGuild(r.Context(), role.GuildID, "GUILD_ROLE_DELETE", map[string]any{"role_id": roleID})
+	h.logAudit(r.Context(), role.GuildID, uid, &roleID, "role_delete", "", nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -204,6 +210,11 @@ func (h *Handler) AssignRole(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "rol atanamadı")
 		return
 	}
+	h.Events.ToGuild(r.Context(), guildID, "GUILD_MEMBER_UPDATE", map[string]any{
+		"user_id":      userID,
+		"role_added":   roleID,
+	})
+	h.logAudit(r.Context(), guildID, uid, &userID, "role_assign", "", map[string]any{"role_id": roleID})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -231,6 +242,11 @@ func (h *Handler) UnassignRole(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "rol kaldırılamadı")
 		return
 	}
+	h.Events.ToGuild(r.Context(), guildID, "GUILD_MEMBER_UPDATE", map[string]any{
+		"user_id":      userID,
+		"role_removed": roleID,
+	})
+	h.logAudit(r.Context(), guildID, uid, &userID, "role_unassign", "", map[string]any{"role_id": roleID})
 	w.WriteHeader(http.StatusNoContent)
 }
 

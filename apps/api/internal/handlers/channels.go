@@ -74,6 +74,11 @@ func (h *Handler) CreateChannel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "kanal oluşturulamadı")
 		return
 	}
+	h.Events.ToGuild(r.Context(), guildID, "CHANNEL_CREATE", map[string]any{"channel": c})
+	h.logAudit(r.Context(), guildID, uid, &c.ID, "channel_create", "", map[string]string{
+		"name": c.Name,
+		"type": c.Type,
+	})
 	writeJSON(w, http.StatusCreated, c)
 }
 

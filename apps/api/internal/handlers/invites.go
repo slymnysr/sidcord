@@ -107,6 +107,11 @@ func (h *Handler) AcceptInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	guild, _ := h.Guilds.ByID(r.Context(), guildID)
+	user, _ := h.Users.ByID(r.Context(), uid)
+	h.Events.ToGuild(r.Context(), guildID, "GUILD_MEMBER_ADD", map[string]any{
+		"user":     user,
+		"guild_id": guildID,
+	})
 	writeJSON(w, http.StatusOK, guild)
 }
 

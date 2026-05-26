@@ -10,53 +10,196 @@ import (
 	"time"
 
 	"github.com/sidcord/api/internal/middleware"
+	"github.com/sidcord/api/internal/perms"
 	"github.com/sidcord/api/internal/repo"
 )
 
-// @kullaniciadi formatındaki bahsetmeleri çıkar
-var mentionRegex = regexp.MustCompile(`@([a-z0-9_.]{3,32})`)
+// Mention pattern'leri
+//   @kullaniciadi            → username (kullanıcı)
+//   <@123456789>             → user_id direkt
+//   <@&123456789>            → role_id (rol mention)
+//   @everyone                → tüm üyeler (MENTION_EVERYONE perm gerekli)
+//   @here                    → sadece online üyeler (MENTION_EVERYONE perm gerekli)
+var (
+	mentionUserRegex     = regexp.MustCompile(`@([a-z0-9_.]{3,32})`)
+	mentionUserIDRegex   = regexp.MustCompile(`<@(\d{10,21})>`)
+	mentionRoleIDRegex   = regexp.MustCompile(`<@&(\d{10,21})>`)
+	mentionEveryoneRegex = regexp.MustCompile(`(?:^|\s)@everyone(?:\s|$)`)
+	mentionHereRegex     = regexp.MustCompile(`(?:^|\s)@here(?:\s|$)`)
+)
 
-// parseAndPersistMentions — mesaj içeriğindeki @ bahsetmelerini ayıklar,
-// kullanıcıları çözer, mention tablosuna ekler, notification oluşturur.
+// parseAndPersistMentions — kullanıcı + rol + everyone/here bahsetmelerini ayıklar.
+// İzin gerektiren bahsetmeleri (everyone, role[mentionable=false]) kontrol eder.
+// Bildirim oluşturur ve gateway'e yayar.
 func (h *Handler) parseAndPersistMentions(ctx context.Context, ch *repo.Channel, m *repo.Message) []int64 {
-	matches := mentionRegex.FindAllStringSubmatch(m.Content, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-	usernames := map[string]bool{}
-	for _, mm := range matches {
-		if len(mm) > 1 {
-			usernames[strings.ToLower(mm[1])] = true
+	content := m.Content
+	mentionedUsers := map[int64]bool{}
+
+	// 1) Username mention'ları
+	if matches := mentionUserRegex.FindAllStringSubmatch(content, -1); len(matches) > 0 {
+		usernames := map[string]bool{}
+		for _, mm := range matches {
+			if len(mm) > 1 {
+				usernames[strings.ToLower(mm[1])] = true
+			}
 		}
-	}
-	if len(usernames) == 0 {
-		return nil
-	}
-	list := make([]string, 0, len(usernames))
-	for u := range usernames {
-		list = append(list, u)
+		list := make([]string, 0, len(usernames))
+		for u := range usernames {
+			list = append(list, u)
+		}
+		if len(list) > 0 {
+			rows, _ := h.Pool.Query(ctx, `SELECT id FROM users WHERE lower(username) = ANY($1)`, list)
+			if rows != nil {
+				for rows.Next() {
+					var uid int64
+					if err := rows.Scan(&uid); err == nil && uid != m.AuthorID {
+						mentionedUsers[uid] = true
+					}
+				}
+				rows.Close()
+			}
+		}
 	}
 
-	// Kullanıcıları çöz
-	rows, err := h.Pool.Query(ctx, `SELECT id FROM users WHERE lower(username) = ANY($1)`, list)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var userIDs []int64
-	for rows.Next() {
-		var uid int64
-		if err := rows.Scan(&uid); err == nil && uid != m.AuthorID {
-			userIDs = append(userIDs, uid)
+	// 2) Direct user ID mention <@123>
+	if matches := mentionUserIDRegex.FindAllStringSubmatch(content, -1); len(matches) > 0 {
+		var ids []int64
+		for _, mm := range matches {
+			if len(mm) > 1 {
+				if id, err := strconv.ParseInt(mm[1], 10, 64); err == nil && id != m.AuthorID {
+					ids = append(ids, id)
+				}
+			}
+		}
+		if len(ids) > 0 {
+			// Sadece sunucu üyesi olanları al
+			if ch.GuildID != nil {
+				rows, _ := h.Pool.Query(ctx,
+					`SELECT user_id FROM guild_members WHERE guild_id = $1 AND user_id = ANY($2)`,
+					*ch.GuildID, ids)
+				if rows != nil {
+					for rows.Next() {
+						var uid int64
+						if err := rows.Scan(&uid); err == nil {
+							mentionedUsers[uid] = true
+						}
+					}
+					rows.Close()
+				}
+			} else {
+				// DM — sadece kanalın katılımcıları
+				rows, _ := h.Pool.Query(ctx,
+					`SELECT user_id FROM dm_participants WHERE channel_id = $1 AND user_id = ANY($2)`,
+					ch.ID, ids)
+				if rows != nil {
+					for rows.Next() {
+						var uid int64
+						if err := rows.Scan(&uid); err == nil {
+							mentionedUsers[uid] = true
+						}
+					}
+					rows.Close()
+				}
+			}
 		}
 	}
-	if len(userIDs) == 0 {
+
+	// 3) Role mention <@&123> — sadece guild
+	if ch.GuildID != nil {
+		if matches := mentionRoleIDRegex.FindAllStringSubmatch(content, -1); len(matches) > 0 {
+			var roleIDs []int64
+			for _, mm := range matches {
+				if len(mm) > 1 {
+					if id, err := strconv.ParseInt(mm[1], 10, 64); err == nil {
+						roleIDs = append(roleIDs, id)
+					}
+				}
+			}
+			if len(roleIDs) > 0 {
+				// Rollerin mentionable olduğunu veya yazar'ın MentionEveryone iznine sahip olduğunu kontrol et
+				authorPerms, _ := h.Roles.MemberPermissions(ctx, *ch.GuildID, m.AuthorID)
+				canMentionAny := perms.Has(authorPerms, perms.MentionEveryone)
+
+				// Rol bilgilerini al
+				rows, _ := h.Pool.Query(ctx,
+					`SELECT id, mentionable FROM roles WHERE id = ANY($1) AND guild_id = $2`,
+					roleIDs, *ch.GuildID)
+				validRoles := []int64{}
+				if rows != nil {
+					for rows.Next() {
+						var rid int64
+						var mentionable bool
+						if err := rows.Scan(&rid, &mentionable); err == nil {
+							if mentionable || canMentionAny {
+								validRoles = append(validRoles, rid)
+							}
+						}
+					}
+					rows.Close()
+				}
+
+				// Rol → üye listesini al
+				if len(validRoles) > 0 {
+					memberRows, _ := h.Pool.Query(ctx, `
+                        SELECT DISTINCT user_id FROM member_roles
+                        WHERE guild_id = $1 AND role_id = ANY($2)
+                    `, *ch.GuildID, validRoles)
+					if memberRows != nil {
+						for memberRows.Next() {
+							var uid int64
+							if err := memberRows.Scan(&uid); err == nil && uid != m.AuthorID {
+								mentionedUsers[uid] = true
+							}
+						}
+						memberRows.Close()
+					}
+				}
+			}
+		}
+	}
+
+	// 4) @everyone / @here — sadece guild, MENTION_EVERYONE izni gerekli
+	everyoneHit := mentionEveryoneRegex.MatchString(" " + content + " ")
+	hereHit := mentionHereRegex.MatchString(" " + content + " ")
+	if (everyoneHit || hereHit) && ch.GuildID != nil {
+		authorPerms, _ := h.Roles.MemberPermissions(ctx, *ch.GuildID, m.AuthorID)
+		if perms.Has(authorPerms, perms.MentionEveryone) {
+			// Mesajda mention_everyone flag'i set et
+			_, _ = h.Pool.Exec(ctx, `UPDATE messages SET mention_everyone = TRUE WHERE id = $1`, m.ID)
+
+			var q string
+			if hereHit && !everyoneHit {
+				// @here → sadece presence'a göre online olanlar; basitleştirme: status != 'offline'
+				q = `SELECT user_id FROM guild_members WHERE guild_id = $1`
+				// Not: Gerçek "online" presence ayrı gelmeli; şimdilik tüm üyelere yayıyoruz
+			} else {
+				q = `SELECT user_id FROM guild_members WHERE guild_id = $1`
+			}
+			rows, _ := h.Pool.Query(ctx, q, *ch.GuildID)
+			if rows != nil {
+				for rows.Next() {
+					var uid int64
+					if err := rows.Scan(&uid); err == nil && uid != m.AuthorID {
+						mentionedUsers[uid] = true
+					}
+				}
+				rows.Close()
+			}
+		}
+	}
+
+	if len(mentionedUsers) == 0 {
 		return nil
+	}
+
+	userIDs := make([]int64, 0, len(mentionedUsers))
+	for id := range mentionedUsers {
+		userIDs = append(userIDs, id)
 	}
 
 	_ = h.Mentions.Add(ctx, m.ID, userIDs)
 
-	// Notification oluştur ve user'lara redis ile yayınla
+	// Bildirim oluştur ve user kanalına yay
 	for _, uid := range userIDs {
 		n := &repo.Notification{
 			ID:        h.IDs.Next(),

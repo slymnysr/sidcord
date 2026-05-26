@@ -55,6 +55,12 @@ func (h *Handler) BanMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "ban başarısız")
 		return
 	}
+	h.Events.ToGuild(r.Context(), guildID, "GUILD_MEMBER_REMOVE", map[string]any{"user_id": userID, "reason": "banned"})
+	auditReason := ""
+	if reason != nil {
+		auditReason = *reason
+	}
+	h.logAudit(r.Context(), guildID, requester, &userID, "member_ban", auditReason, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -81,6 +87,7 @@ func (h *Handler) Unban(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "unban başarısız")
 		return
 	}
+	h.logAudit(r.Context(), guildID, requester, &userID, "member_unban", "", nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -133,6 +140,8 @@ func (h *Handler) KickMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "kick başarısız")
 		return
 	}
+	h.Events.ToGuild(r.Context(), guildID, "GUILD_MEMBER_REMOVE", map[string]any{"user_id": userID, "reason": "kicked"})
+	h.logAudit(r.Context(), guildID, requester, &userID, "member_kick", "", nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -169,5 +178,9 @@ func (h *Handler) TimeoutMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "timeout başarısız")
 		return
 	}
+	h.logAudit(r.Context(), guildID, requester, &userID, "member_timeout", "", map[string]any{
+		"duration_sec": req.DurationSec,
+		"until":        until,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"timeout_until": until})
 }

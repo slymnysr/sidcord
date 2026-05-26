@@ -9,6 +9,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/sidcord/api/internal/auth"
 	"github.com/sidcord/api/internal/config"
+	"github.com/sidcord/api/internal/events"
 	"github.com/sidcord/api/internal/repo"
 	"github.com/sidcord/api/internal/snowflake"
 	"github.com/sidcord/api/internal/storage"
@@ -24,6 +25,7 @@ type Handler struct {
 	Pool    *pgxpool.Pool
 	Redis   *redis.Client
 	Storage *storage.Storage
+	Events  *events.Publisher
 
 	Users         *repo.Users
 	Guilds        *repo.Guilds
@@ -41,6 +43,7 @@ type Handler struct {
 	Mentions      *repo.Mentions
 	Notifications *repo.Notifications
 	Friends       *repo.Friends
+	LoginAttempts *repo.LoginAttempts
 }
 
 func New(logger *zap.Logger, cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client, ids *snowflake.Generator, iss *auth.Issuer, store *storage.Storage) *Handler {
@@ -52,6 +55,7 @@ func New(logger *zap.Logger, cfg *config.Config, pool *pgxpool.Pool, rdb *redis.
 		Pool:          pool,
 		Redis:         rdb,
 		Storage:       store,
+		Events:        events.New(rdb),
 		Users:         repo.NewUsers(pool),
 		Guilds:        repo.NewGuilds(pool),
 		Channels:      repo.NewChannels(pool),
@@ -68,6 +72,7 @@ func New(logger *zap.Logger, cfg *config.Config, pool *pgxpool.Pool, rdb *redis.
 		Mentions:      repo.NewMentions(pool),
 		Notifications: repo.NewNotifications(pool),
 		Friends:       repo.NewFriends(pool),
+		LoginAttempts: repo.NewLoginAttempts(pool),
 	}
 }
 

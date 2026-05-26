@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"net/mail"
 	"regexp"
@@ -13,6 +14,27 @@ import (
 	"github.com/sidcord/api/internal/repo"
 	"go.uber.org/zap"
 )
+
+// parseClientIP — X-Forwarded-For veya RemoteAddr'dan IP çıkar
+func parseClientIP(r *http.Request) net.IP {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		// İlk IP gerçek istemci
+		first := strings.TrimSpace(strings.Split(xff, ",")[0])
+		if ip := net.ParseIP(first); ip != nil {
+			return ip
+		}
+	}
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		if ip := net.ParseIP(xri); ip != nil {
+			return ip
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	return net.ParseIP(host)
+}
 
 var usernameRegex = regexp.MustCompile(`^[a-z0-9_.]{3,32}$`)
 
@@ -103,20 +125,33 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
+	clientIP := parseClientIP(r)
+
+	// Brute-force kontrolü: 15 dakikada 5 başarısızdan fazlaysa engelle
+	failures, _ := h.LoginAttempts.RecentFailures(r.Context(), req.Email, clientIP, 15*time.Minute)
+	if failures >= 5 {
+		writeError(w, http.StatusTooManyRequests, "rate_limited",
+			"çok fazla başarısız giriş; lütfen 15 dakika sonra tekrar dene")
+		return
+	}
 
 	user, err := h.Users.ByEmail(r.Context(), req.Email)
 	if err != nil {
 		// Sabit zaman: aynı yanıt
 		_, _ = auth.VerifyPassword(req.Password, "$argon2id$v=19$m=65536,t=2,p=2$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+		_ = h.LoginAttempts.Record(r.Context(), h.IDs.Next(), req.Email, clientIP, false)
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "e-posta veya parola hatalı")
 		return
 	}
 
 	ok, err := auth.VerifyPassword(req.Password, user.PasswordHash)
 	if err != nil || !ok {
+		_ = h.LoginAttempts.Record(r.Context(), h.IDs.Next(), req.Email, clientIP, false)
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "e-posta veya parola hatalı")
 		return
 	}
+
+	_ = h.LoginAttempts.Record(r.Context(), h.IDs.Next(), req.Email, clientIP, true)
 
 	resp, err := h.issueTokens(r, user)
 	if err != nil {

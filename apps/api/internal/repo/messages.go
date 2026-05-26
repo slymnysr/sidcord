@@ -8,13 +8,15 @@ import (
 )
 
 type Message struct {
-	ID          int64        `json:"id,string"`
-	ChannelID   int64        `json:"channel_id,string"`
-	AuthorID    int64        `json:"author_id,string"`
-	Content     string       `json:"content"`
-	EditedAt    *time.Time   `json:"edited_at,omitempty"`
-	CreatedAt   time.Time    `json:"created_at"`
-	Attachments []Attachment `json:"attachments,omitempty"`
+	ID              int64        `json:"id,string"`
+	ChannelID       int64        `json:"channel_id,string"`
+	AuthorID        int64        `json:"author_id,string"`
+	Content         string       `json:"content"`
+	EditedAt        *time.Time   `json:"edited_at,omitempty"`
+	CreatedAt       time.Time    `json:"created_at"`
+	RepliedToID     *int64       `json:"replied_to_id,string,omitempty"`
+	MentionEveryone bool         `json:"mention_everyone,omitempty"`
+	Attachments     []Attachment `json:"attachments,omitempty"`
 }
 
 type Messages struct{ pool *pgxpool.Pool }
@@ -23,18 +25,18 @@ func NewMessages(p *pgxpool.Pool) *Messages { return &Messages{pool: p} }
 
 func (r *Messages) Create(ctx context.Context, m *Message) error {
 	_, err := r.pool.Exec(ctx, `
-        INSERT INTO messages (id, channel_id, author_id, content)
-        VALUES ($1, $2, $3, $4)
-    `, m.ID, m.ChannelID, m.AuthorID, m.Content)
+        INSERT INTO messages (id, channel_id, author_id, content, replied_to_id)
+        VALUES ($1, $2, $3, $4, $5)
+    `, m.ID, m.ChannelID, m.AuthorID, m.Content, m.RepliedToID)
 	return err
 }
 
 func (r *Messages) ByID(ctx context.Context, id int64) (*Message, error) {
 	m := &Message{}
 	err := r.pool.QueryRow(ctx, `
-        SELECT id, channel_id, author_id, content, edited_at, created_at
+        SELECT id, channel_id, author_id, content, edited_at, created_at, replied_to_id, mention_everyone
         FROM messages WHERE id = $1
-    `, id).Scan(&m.ID, &m.ChannelID, &m.AuthorID, &m.Content, &m.EditedAt, &m.CreatedAt)
+    `, id).Scan(&m.ID, &m.ChannelID, &m.AuthorID, &m.Content, &m.EditedAt, &m.CreatedAt, &m.RepliedToID, &m.MentionEveryone)
 	return m, err
 }
 
@@ -70,7 +72,7 @@ func (r *Messages) ListByChannel(ctx context.Context, channelID int64, before in
 	}
 	args := []any{channelID, limit}
 	q := `
-        SELECT id, channel_id, author_id, content, edited_at, created_at
+        SELECT id, channel_id, author_id, content, edited_at, created_at, replied_to_id, mention_everyone
         FROM messages
         WHERE channel_id = $1
     `
@@ -89,7 +91,7 @@ func (r *Messages) ListByChannel(ctx context.Context, channelID int64, before in
 	idIndex := map[int64]int{}
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.ID, &m.ChannelID, &m.AuthorID, &m.Content, &m.EditedAt, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.ChannelID, &m.AuthorID, &m.Content, &m.EditedAt, &m.CreatedAt, &m.RepliedToID, &m.MentionEveryone); err != nil {
 			return nil, err
 		}
 		idIndex[m.ID] = len(list)
