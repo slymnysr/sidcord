@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { UserPlus, Hash } from 'lucide-react';
 import { api, type APIDMChannel, type APIPublicUser } from '../api';
-import { useAppDispatch, useAppSelector, openModal, selectDM, setMode, selectChannel } from '../store';
+import { useAppDispatch, useAppSelector, openModal, selectDM, setMode, selectChannel, setPendingDM } from '../store';
 
 export function DMSidebar() {
   const dispatch = useAppDispatch();
   const me = useAppSelector((s) => s.auth.user);
   const selectedDMId = useAppSelector((s) => s.ui.selectedDMChannelId);
+  const pendingDM = useAppSelector((s) => s.ui.pendingDM);
   const [dms, setDMs] = useState<APIDMChannel[]>([]);
   const [partners, setPartners] = useState<Record<string, APIPublicUser>>({});
 
@@ -20,6 +21,7 @@ export function DMSidebar() {
           if (p !== me?.id) userIds.add(p);
         }
       }
+      if (pendingDM) userIds.add(pendingDM.partnerId);
       const ids = Array.from(userIds);
       const results = await Promise.all(
         ids.map((id) => api.users.user(id).catch(() => null)),
@@ -30,6 +32,10 @@ export function DMSidebar() {
         if (u) next[ids[i]] = u;
       }
       setPartners(next);
+      // Pending DM artık listeye geldiyse temizle (mesaj atılmış demektir)
+      if (pendingDM && list.some((d) => d.id === pendingDM.channelId)) {
+        dispatch(setPendingDM(null));
+      }
     } catch (e) {
       console.warn('dm refresh', e);
     }
@@ -38,7 +44,13 @@ export function DMSidebar() {
   useEffect(() => {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me?.id]);
+  }, [me?.id, selectedDMId, pendingDM?.channelId]);
+
+  // Pending DM listede mevcutsa zaten gösteriliyor, ekstra satır gereksiz
+  const showPending =
+    pendingDM && !dms.some((d) => d.id === pendingDM.channelId)
+      ? pendingDM
+      : null;
 
   function dmTitle(dm: APIDMChannel): string {
     const other = dm.participants.find((p) => p !== me?.id);
@@ -71,11 +83,41 @@ export function DMSidebar() {
         <div className="px-2 mb-2 text-[11px] font-bold text-ink-tertiary uppercase tracking-[0.08em]">
           Doğrudan Mesajlar — {dms.length}
         </div>
-        {dms.length === 0 && (
+        {dms.length === 0 && !showPending && (
           <p className="px-2 text-xs text-ink-tertiary">
             Henüz DM yok. "Arkadaş Ekle" ile başla.
           </p>
         )}
+        {showPending && (() => {
+          const partner = partners[showPending.partnerId];
+          const title = partner?.display_name ?? `Kullanıcı ${showPending.partnerId.slice(-4)}`;
+          const color = partner?.avatar_color ?? '#6B7280';
+          const active = showPending.channelId === selectedDMId;
+          return (
+            <button
+              onClick={() => {
+                dispatch(selectDM(showPending.channelId));
+                dispatch(selectChannel(showPending.channelId));
+              }}
+              className={
+                'w-full text-left px-2 py-1.5 rounded-md flex items-center gap-2.5 transition-colors ' +
+                (active
+                  ? 'bg-brand-500/10 text-ink-primary'
+                  : 'text-ink-secondary hover:bg-surface-2 hover:text-ink-primary')
+              }
+              title="Henüz mesaj atılmadı"
+            >
+              <div
+                className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[11px] font-bold shrink-0 ring-1 ring-brand-500/40"
+                style={{ backgroundColor: color }}
+              >
+                {title.slice(0, 1).toUpperCase()}
+              </div>
+              <span className="text-sm truncate font-medium flex-1">{title}</span>
+              <span className="text-[9px] uppercase font-bold text-brand-500 tracking-wider">Yeni</span>
+            </button>
+          );
+        })()}
         {dms.map((dm) => {
           const active = dm.id === selectedDMId;
           return (

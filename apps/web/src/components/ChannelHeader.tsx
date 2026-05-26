@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Hash, Volume2, Megaphone, MessagesSquare, Mic, Users, UserPlus, Bell, Search, AtSign, type LucideIcon } from 'lucide-react';
-import { useAppDispatch, useAppSelector, toggleMemberList, openModal } from '../store';
+import { useAppDispatch, useAppSelector, toggleMemberList, openModal, openProfileCard } from '../store';
 import { api, type APIPublicUser } from '../api';
 
 const Icon: Record<string, LucideIcon> = {
@@ -108,23 +108,35 @@ export function ChannelHeader() {
 function NotificationsBell() {
   const [count, setCount] = useState(0);
   const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<import('../api').APINotification[]>([]);
+
+  async function refreshCount() {
+    try {
+      const r = await api.notifications.count();
+      setCount(r.unread);
+    } catch {}
+  }
+  async function refreshList() {
+    try {
+      const list = await api.notifications.list();
+      setItems(list);
+    } catch {}
+  }
 
   useEffect(() => {
-    async function refresh() {
-      try {
-        const r = await api.notifications.count();
-        setCount(r.unread);
-      } catch {}
-    }
-    refresh();
-    const t = setInterval(refresh, 15000);
+    refreshCount();
+    const t = setInterval(refreshCount, 15000);
     return () => clearInterval(t);
   }, []);
+
+  useEffect(() => {
+    if (open) refreshList();
+  }, [open]);
 
   async function markAll() {
     await api.notifications.markAllRead().catch(() => {});
     setCount(0);
-    setOpen(false);
+    setItems((xs) => xs.map((x) => ({ ...x, read_at: x.read_at ?? new Date().toISOString() })));
   }
 
   return (
@@ -142,18 +154,101 @@ function NotificationsBell() {
         )}
       </button>
       {open && (
-        <div className="absolute right-0 top-11 w-72 bg-surface-1 border border-line rounded-xl shadow-2xl p-3 z-30">
-          <div className="flex items-center justify-between mb-2">
+        <div className="absolute right-0 top-11 w-80 max-h-[480px] flex flex-col bg-surface-1 border border-line rounded-xl shadow-2xl z-30">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-line shrink-0">
             <h3 className="font-semibold text-ink-primary">Bildirimler</h3>
-            <button onClick={markAll} className="text-xs text-brand-500 hover:underline">
-              Hepsini okundu işaretle
-            </button>
+            {count > 0 && (
+              <button onClick={markAll} className="text-xs text-brand-500 hover:underline">
+                Hepsini okundu işaretle
+              </button>
+            )}
           </div>
-          <p className="text-sm text-ink-tertiary">
-            {count === 0 ? 'Yeni bildirim yok.' : `${count} okunmamış bildirim`}
-          </p>
+          <div className="overflow-y-auto flex-1">
+            {items.length === 0 ? (
+              <p className="text-sm text-ink-tertiary px-4 py-6 text-center">Yeni bildirim yok.</p>
+            ) : (
+              <ul>
+                {items.map((n) => (
+                  <NotificationItem key={n.id} n={n} />
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
       )}
     </div>
   );
+}
+
+function NotificationItem({ n }: { n: import('../api').APINotification }) {
+  const dispatch = useAppDispatch();
+  const unread = !n.read_at;
+  const actor = n.actor_display_name ?? n.actor_username ?? 'Birisi';
+  const color = n.actor_avatar_color ?? '#6B7280';
+
+  let title = '';
+  let body = '';
+  if (n.type === 'mention') {
+    const where = n.channel_name
+      ? `#${n.channel_name}${n.guild_name ? ` · ${n.guild_name}` : ''}`
+      : '';
+    title = `${actor} senden bahsetti`;
+    body = n.message_preview ? `${where} — ${n.message_preview}` : where;
+  } else if (n.type === 'friend_request') {
+    title = `${actor} sana arkadaşlık isteği gönderdi`;
+  } else if (n.type === 'reply') {
+    title = `${actor} mesajına yanıt verdi`;
+    body = n.message_preview ?? '';
+  } else {
+    title = n.type;
+    body = n.message_preview ?? '';
+  }
+
+  function onClick() {
+    if (n.type === 'friend_request' && n.actor_id) {
+      dispatch(openProfileCard({ userId: n.actor_id, anchorRect: null }));
+    }
+  }
+
+  const dt = new Date(n.created_at);
+  const rel = formatRel(dt);
+
+  return (
+    <li>
+      <button
+        onClick={onClick}
+        className={
+          'w-full text-left px-4 py-3 flex gap-3 border-b border-line hover:bg-surface-2 transition-colors ' +
+          (unread ? 'bg-brand-500/5' : '')
+        }
+      >
+        <div
+          className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0"
+          style={{ backgroundColor: color }}
+        >
+          {actor.slice(0, 1).toUpperCase()}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm text-ink-primary leading-snug">{title}</div>
+          {body && (
+            <div className="text-xs text-ink-tertiary truncate mt-0.5">{body}</div>
+          )}
+          <div className="text-[10px] text-ink-muted mt-1">{rel}</div>
+        </div>
+        {unread && <span className="w-2 h-2 rounded-full bg-brand-500 mt-2 shrink-0" />}
+      </button>
+    </li>
+  );
+}
+
+function formatRel(d: Date): string {
+  const diff = Date.now() - d.getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return 'şimdi';
+  if (m < 60) return `${m} dk önce`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} sa önce`;
+  const days = Math.floor(h / 24);
+  if (days < 7) return `${days} gün önce`;
+  return d.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' });
 }

@@ -59,6 +59,13 @@ func (h *Handler) SendFriendRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "istek gönderilemedi")
 		return
 	}
+	// Hedef kullanıcıya friend_request bildirimi
+	_ = h.Notifications.Create(r.Context(), &repo.Notification{
+		ID:      h.IDs.Next(),
+		UserID:  target,
+		Type:    "friend_request",
+		ActorID: &uid,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 

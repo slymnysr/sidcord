@@ -229,13 +229,13 @@ func (h *Handler) parseAndPersistMentions(ctx context.Context, ch *repo.Channel,
 
 func (h *Handler) ListNotifications(w http.ResponseWriter, r *http.Request) {
 	uid := middleware.UserIDFrom(r.Context())
-	list, err := h.Notifications.ListUnread(r.Context(), uid, 50)
+	list, err := h.Notifications.ListEnriched(r.Context(), uid, 50)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "bildirimler alınamadı")
 		return
 	}
 	if list == nil {
-		list = []repo.Notification{}
+		list = []repo.EnrichedNotification{}
 	}
 	writeJSON(w, http.StatusOK, list)
 }

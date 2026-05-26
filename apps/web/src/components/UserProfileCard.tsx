@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { MessageSquare, UserPlus, X, Check, Clock } from 'lucide-react';
 import { api, type APIPublicUser } from '../api';
-import { useAppDispatch, useAppSelector, selectChannel, setMode, selectDM } from '../store';
+import { useAppDispatch, useAppSelector, selectChannel, setMode, selectDM, setPendingDM } from '../store';
 
 type AnchorRect = { top: number; left: number; right: number; bottom: number; width: number; height: number };
 
@@ -100,6 +100,8 @@ export function UserProfileCard({ userId, onClose, anchorRect }: Props) {
       dispatch(setMode('dm'));
       dispatch(selectDM(channelID));
       dispatch(selectChannel(channelID));
+      // Mesajsız DM olabilir; DMSidebar'a pinned olarak göster
+      dispatch(setPendingDM({ channelId: channelID, partnerId: user.id }));
       onClose();
     } catch (e) {
       console.warn('open dm', e);

@@ -151,12 +151,17 @@ export interface APISearchResult {
 
 export interface APINotification {
   id: Snowflake;
-  user_id: Snowflake;
   type: string;
   channel_id?: Snowflake;
+  channel_name?: string;
   guild_id?: Snowflake;
+  guild_name?: string;
   message_id?: Snowflake;
+  message_preview?: string;
   actor_id?: Snowflake;
+  actor_username?: string;
+  actor_display_name?: string;
+  actor_avatar_color?: string;
   read_at?: string;
   created_at: string;
 }

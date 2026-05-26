@@ -68,7 +68,10 @@ func (r *DMs) OpenDirect(ctx context.Context, userA, userB int64, newID int64) (
 	return newID, tx.Commit(ctx)
 }
 
-// ListForUser — kullanıcının DM kanalları
+// ListForUser — kullanıcının DM kanalları.
+// Discord davranışı: sadece en az 1 mesajı olan DM'ler sidebar'da gözükür.
+// Mesajsız bir DM (profil kartından "Mesaj" ile yeni açılmış) frontend
+// tarafında "aktif" olarak gösterilir; ilk mesajdan sonra listede kalır.
 func (r *DMs) ListForUser(ctx context.Context, userID int64) ([]DMChannel, error) {
 	rows, err := r.pool.Query(ctx, `
         SELECT c.id, c.type::text, c.name, c.created_at,
@@ -76,6 +79,7 @@ func (r *DMs) ListForUser(ctx context.Context, userID int64) ([]DMChannel, error
         FROM channels c
         JOIN dm_participants p ON p.channel_id = c.id
         WHERE c.id IN (SELECT channel_id FROM dm_participants WHERE user_id = $1)
+          AND EXISTS (SELECT 1 FROM messages m WHERE m.channel_id = c.id)
         GROUP BY c.id
         ORDER BY c.created_at DESC
     `, userID)

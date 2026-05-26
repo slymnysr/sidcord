@@ -376,6 +376,8 @@ interface UiState {
     | null;
   profileCardUserId: string | null;
   profileCardAnchor: { top: number; left: number; right: number; bottom: number; width: number; height: number } | null;
+  // Mesajsız ama açık DM (profil kartından "Mesaj" ile gelinen): sidebar'da "Yeni" rozetli pinned satır
+  pendingDM: { channelId: string; partnerId: string } | null;
 }
 
 const uiSlice = createSlice({
@@ -387,6 +389,7 @@ const uiSlice = createSlice({
     modal: null,
     profileCardUserId: null,
     profileCardAnchor: null,
+    pendingDM: null,
   } as UiState,
   reducers: {
     toggleMemberList(state) {
@@ -404,6 +407,12 @@ const uiSlice = createSlice({
     selectDM(state, action: PayloadAction<string>) {
       state.mode = 'dm';
       state.selectedDMChannelId = action.payload;
+    },
+    setPendingDM(
+      state,
+      action: PayloadAction<{ channelId: string; partnerId: string } | null>,
+    ) {
+      state.pendingDM = action.payload;
     },
     openProfileCard(
       state,
@@ -430,7 +439,7 @@ export const { pushMessage, updateMessage, removeMessage } = messagesSlice.actio
 export const { upsertUser } = usersSlice.actions;
 export const { setGuildPresence } = presenceSlice.actions;
 export const { setTyping, pruneTyping } = typingSlice.actions;
-export const { toggleMemberList, openModal, closeModal, setMode, selectDM, openProfileCard } = uiSlice.actions;
+export const { toggleMemberList, openModal, closeModal, setMode, selectDM, openProfileCard, setPendingDM } = uiSlice.actions;
 
 export const store = configureStore({
   reducer: {
