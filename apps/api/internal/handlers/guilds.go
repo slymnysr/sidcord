@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sidcord/api/internal/middleware"
+	"github.com/sidcord/api/internal/perms"
 	"github.com/sidcord/api/internal/repo"
 	"go.uber.org/zap"
 )
@@ -123,10 +124,18 @@ func (h *Handler) ListGuildChannels(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "kanallar alınamadı")
 		return
 	}
-	if list == nil {
-		list = []repo.Channel{}
+	// ViewChannel izniyle filtrele — kanal override'ları rol bazlı izinleri etkiler
+	filtered := make([]repo.Channel, 0, len(list))
+	for _, ch := range list {
+		p, err := h.computeChannelPerms(r.Context(), id, ch.ID, uid)
+		if err != nil {
+			continue
+		}
+		if perms.Has(p, perms.ViewChannel) {
+			filtered = append(filtered, ch)
+		}
 	}
-	writeJSON(w, http.StatusOK, list)
+	writeJSON(w, http.StatusOK, filtered)
 }
 
 func parseID(r *http.Request, key string) (int64, error) {

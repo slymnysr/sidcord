@@ -1,7 +1,32 @@
 import { useState, useRef, useEffect } from 'react';
 import clsx from 'clsx';
-import { Hash, Volume2, Megaphone, MessagesSquare, Mic, ChevronDown, Settings, LogOut, UserPlus, type LucideIcon } from 'lucide-react';
-import { useAppDispatch, useAppSelector, selectChannel, logout, openModal, fetchVoicePresence } from '../store';
+import {
+  Hash,
+  Volume2,
+  Megaphone,
+  MessagesSquare,
+  Mic,
+  ChevronDown,
+  Settings,
+  LogOut,
+  UserPlus,
+  Pencil,
+  Trash2,
+  Link as LinkIcon,
+  BellOff,
+  Bell,
+  type LucideIcon,
+} from 'lucide-react';
+import {
+  useAppDispatch,
+  useAppSelector,
+  selectChannel,
+  logout,
+  openModal,
+  fetchVoicePresence,
+  fetchChannels,
+  openEditChannel,
+} from '../store';
 import { api, type APIChannel } from '../api';
 
 const ChannelIcon: Record<string, LucideIcon> = {
@@ -74,24 +99,13 @@ export function ChannelList() {
                       {active && (
                         <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 bg-brand-500 rounded-r-full" />
                       )}
-                      <button
-                        onClick={() => dispatch(selectChannel(ch.id))}
-                        className={clsx(
-                          'w-full text-left pl-3 pr-2 py-1.5 rounded-md flex items-center gap-2 transition-colors',
-                          active
-                            ? 'bg-brand-500/10 text-ink-primary'
-                            : 'text-ink-secondary hover:bg-surface-2 hover:text-ink-primary',
-                        )}
-                      >
-                        <Icon size={16} className={active ? 'text-brand-500' : 'text-ink-tertiary'} />
-                        <span className="text-sm truncate font-medium">{ch.name}</span>
-                        {ch.type === 'voice' && connected.length > 0 && (
-                          <span className="ml-auto text-[10px] text-brand-500 font-semibold">
-                            {connected.length}
-                          </span>
-                        )}
-                      </button>
-                      {connected.length > 0 && (
+                      <ChannelButton
+                        channel={ch}
+                        active={active}
+                        Icon={Icon}
+                        connectedCount={connected.length}
+                      />
+                      {ch.type === 'voice' && connected.length > 0 && (
                         <ul className="ml-6 mt-0.5 space-y-0.5">
                           {connected.map((uid: string) => {
                             const u = usersById[uid];
@@ -115,6 +129,199 @@ export function ChannelList() {
 
       <UserPanel />
     </aside>
+  );
+}
+
+function ChannelButton({
+  channel,
+  active,
+  Icon,
+  connectedCount,
+}: {
+  channel: APIChannel;
+  active: boolean;
+  Icon: LucideIcon;
+  connectedCount: number;
+}) {
+  const dispatch = useAppDispatch();
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+
+  function onContextMenu(e: React.MouseEvent) {
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY });
+  }
+
+  return (
+    <>
+      <button
+        onClick={() => dispatch(selectChannel(channel.id))}
+        onContextMenu={onContextMenu}
+        className={clsx(
+          'w-full text-left pl-3 pr-2 py-1.5 rounded-md flex items-center gap-2 transition-colors',
+          active
+            ? 'bg-brand-500/10 text-ink-primary'
+            : 'text-ink-secondary hover:bg-surface-2 hover:text-ink-primary',
+        )}
+      >
+        <Icon size={16} className={active ? 'text-brand-500' : 'text-ink-tertiary'} />
+        <span className="text-sm truncate font-medium">{channel.name}</span>
+        {channel.type === 'voice' && connectedCount > 0 && (
+          <span className="ml-auto text-[10px] text-brand-500 font-semibold">{connectedCount}</span>
+        )}
+      </button>
+      {menu && (
+        <ChannelContextMenu
+          channel={channel}
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+        />
+      )}
+    </>
+  );
+}
+
+function ChannelContextMenu({
+  channel,
+  x,
+  y,
+  onClose,
+}: {
+  channel: APIChannel;
+  x: number;
+  y: number;
+  onClose: () => void;
+}) {
+  const dispatch = useAppDispatch();
+  const guildId = useAppSelector((s) => s.guilds.selectedId);
+  const ref = useRef<HTMLDivElement>(null);
+  const [muted, setMuted] = useState(false);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    }
+    function key(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('mousedown', handler);
+    document.addEventListener('keydown', key);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('keydown', key);
+    };
+  }, [onClose]);
+
+  async function copyLink() {
+    const url = `${location.origin}/channels/${channel.guild_id}/${channel.id}`;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {}
+    onClose();
+  }
+
+  async function toggleMute() {
+    try {
+      await api.channels.muteSettings(channel.id, {
+        notif_level: muted ? 'all' : 'nothing',
+      });
+      setMuted(!muted);
+    } catch {}
+    onClose();
+  }
+
+  async function doDelete() {
+    if (!guildId) return;
+    if (!confirm(`#${channel.name} kanalını silmek istediğine emin misin?`)) {
+      onClose();
+      return;
+    }
+    try {
+      await api.channels.delete(channel.id);
+      await dispatch(fetchChannels(guildId));
+    } catch (e) {
+      console.warn('delete channel', e);
+    }
+    onClose();
+  }
+
+  // Sağ tık menüsünü viewport içine sığdır
+  const cardWidth = 220;
+  const cardHeight = 320;
+  let left = x;
+  let top = y;
+  if (left + cardWidth > window.innerWidth) left = window.innerWidth - cardWidth - 8;
+  if (top + cardHeight > window.innerHeight) top = window.innerHeight - cardHeight - 8;
+
+  return (
+    <div className="fixed inset-0 z-50 pointer-events-none">
+      <div
+        ref={ref}
+        style={{ left, top, width: cardWidth }}
+        className="absolute bg-surface-1 border border-line rounded-xl shadow-2xl p-1 pointer-events-auto ring-1 ring-white/5"
+      >
+        <CtxItem
+          icon={<Pencil size={14} />}
+          label="Kanalı Düzenle"
+          onClick={() => {
+            dispatch(openEditChannel(channel.id));
+            onClose();
+          }}
+        />
+        <CtxItem
+          icon={muted ? <Bell size={14} /> : <BellOff size={14} />}
+          label={muted ? 'Sesi Aç' : 'Sustur'}
+          onClick={toggleMute}
+        />
+        <CtxItem
+          icon={<LinkIcon size={14} />}
+          label="Davet Oluştur"
+          onClick={() => {
+            dispatch(openModal('invite_link'));
+            onClose();
+          }}
+        />
+        <CtxItem
+          icon={<LinkIcon size={14} />}
+          label="Kanal Linkini Kopyala"
+          onClick={copyLink}
+        />
+        <div className="my-1 h-px bg-line" />
+        <CtxItem
+          icon={<Trash2 size={14} />}
+          label="Kanalı Sil"
+          danger
+          onClick={doDelete}
+        />
+      </div>
+    </div>
+  );
+}
+
+function CtxItem({
+  icon,
+  label,
+  danger,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  danger?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={clsx(
+        'w-full text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2.5 transition-colors',
+        danger
+          ? 'text-accent-500 hover:bg-accent-500/10'
+          : 'text-ink-primary hover:bg-surface-2',
+      )}
+    >
+      <span className={danger ? 'text-accent-500' : 'text-ink-tertiary'}>{icon}</span>
+      <span className="font-medium">{label}</span>
+    </button>
   );
 }
 

@@ -415,6 +415,27 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ guild_id: guildId, name, type }),
       }),
+    update: (
+      channelId: string,
+      patch: { name?: string; topic?: string; nsfw?: boolean; rate_limit_sec?: number },
+    ) =>
+      request<APIChannel>(`/channels/${channelId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      }),
+    delete: (channelId: string) =>
+      request<void>(`/channels/${channelId}`, { method: 'DELETE' }),
+    muteSettings: (
+      channelId: string,
+      input: {
+        notif_level?: 'all' | 'mentions' | 'nothing';
+        mute_until_sec?: number;
+      },
+    ) =>
+      request<void>(`/channels/${channelId}/notif-settings`, {
+        method: 'PUT',
+        body: JSON.stringify(input),
+      }),
     messages: (channelId: string, before?: string, limit = 50) => {
       const q = new URLSearchParams();
       if (before) q.set('before', before);

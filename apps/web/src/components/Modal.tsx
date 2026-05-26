@@ -8,9 +8,17 @@ import { ServerSettingsModal } from './ServerSettingsModal';
 import { AddFriendModal } from './AddFriendModal';
 import { SearchModal } from './SearchModal';
 import { CreateChannelModal } from './CreateChannelModal';
+import { ChannelEditModal } from './ChannelEditModal';
 
 export function Modal() {
   const modal = useAppSelector((s) => s.ui.modal);
+  const editingChannelId = useAppSelector((s) => s.ui.editingChannelId);
+  const guildId = useAppSelector((s) => s.guilds.selectedId);
+  const editingChannel = useAppSelector((s) =>
+    guildId && editingChannelId
+      ? s.channels.byGuild[guildId]?.find((c) => c.id === editingChannelId)
+      : null,
+  );
   const dispatch = useAppDispatch();
 
   useEffect(() => {
@@ -53,6 +61,7 @@ export function Modal() {
         {modal === 'friends' && <AddFriendModal />}
         {modal === 'search' && <SearchModal />}
         {modal === 'create_channel' && <CreateChannelModal />}
+        {modal === 'edit_channel' && editingChannel && <ChannelEditModal channel={editingChannel} />}
       </div>
     </div>
   );
