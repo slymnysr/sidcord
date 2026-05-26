@@ -196,19 +196,48 @@ class VoiceClient {
     this.emit('local:screen', { stream: null });
   }
 
-  setMicrophoneEnabled(enabled: boolean) {
-    if (!this.audioProducer) return;
-    if (enabled) this.audioProducer.resume();
-    else this.audioProducer.pause();
-    this.emit('mic:changed', { enabled });
+  // micMuted: kullanıcı sustur dediğinde true (track tamamen kapalı,
+  // tarayıcı sekme ikonu da söner). Tekrar açınca yeni getUserMedia.
+  private micMuted = false;
+
+  async setMicrophoneEnabled(enabled: boolean) {
+    if (enabled) {
+      if (this.audioProducer && !this.audioProducer.closed) return;
+      if (!this.sendTransport) return;
+      try {
+        this.micStream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+          video: false,
+        });
+        const audioTrack = this.micStream.getAudioTracks()[0];
+        this.audioProducer = await this.sendTransport.produce({
+          track: audioTrack,
+          appData: { source: 'mic' },
+        });
+        this.producerSource.set(this.audioProducer.id, 'mic');
+        this.micMuted = false;
+        this.emit('mic:changed', { enabled: true });
+      } catch (e) {
+        console.warn('mic re-open failed', e);
+      }
+    } else {
+      try {
+        this.audioProducer?.close();
+        this.micStream?.getTracks().forEach((t) => t.stop());
+      } catch {}
+      this.audioProducer = null;
+      this.micStream = null;
+      this.micMuted = true;
+      this.emit('mic:changed', { enabled: false });
+    }
   }
 
   isConnected(): boolean {
-    return this.channelId != null && !!this.audioProducer;
+    return this.channelId != null && (!!this.audioProducer || this.micMuted);
   }
 
   isMicrophoneEnabled(): boolean {
-    return this.audioProducer ? !this.audioProducer.paused : true;
+    return !!this.audioProducer && !this.audioProducer.paused;
   }
 
   async disconnect() {
@@ -243,6 +272,7 @@ class VoiceClient {
     this.cameraProducer = null;
     this.screenProducer = null;
     this.micStream = null;
+    this.micMuted = false;
     this.cameraStream = null;
     this.screenStream = null;
     this.channelId = null;
