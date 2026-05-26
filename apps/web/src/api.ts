@@ -32,7 +32,7 @@ export interface APIChannel {
   id: Snowflake;
   guild_id: Snowflake;
   parent_id?: Snowflake;
-  type: 'text' | 'voice' | 'announcement' | 'forum' | 'stage' | 'category';
+  type: 'text' | 'voice' | 'announcement' | 'forum' | 'stage' | 'category' | 'media' | 'public_thread' | 'private_thread' | 'news_thread';
   name: string;
   topic?: string;
   position: number;
@@ -300,7 +300,7 @@ export const api = {
     createChannel: (
       guildId: string,
       name: string,
-      type: 'text' | 'voice' | 'announcement' | 'forum' | 'stage' | 'category' = 'text',
+      type: 'text' | 'voice' | 'announcement' | 'forum' | 'stage' | 'category' | 'media' = 'text',
       parentId?: string | null,
     ) =>
       request<APIChannel>('/channels', {
@@ -415,6 +415,94 @@ export const api = {
       request<void>(`/messages/${messageId}`, { method: 'DELETE' }),
     pin: (messageId: string) => request<void>(`/messages/${messageId}/pin`, { method: 'PUT' }),
     unpin: (messageId: string) => request<void>(`/messages/${messageId}/pin`, { method: 'DELETE' }),
+  },
+
+  events: {
+    list: (guildId: string) =>
+      request<
+        Array<{
+          id: Snowflake;
+          guild_id: Snowflake;
+          channel_id?: Snowflake;
+          creator_id: Snowflake;
+          name: string;
+          description?: string;
+          scheduled_start_at: string;
+          scheduled_end_at?: string;
+          entity_type: 'voice' | 'stage_instance' | 'external';
+          entity_location?: string;
+          status: 'scheduled' | 'active' | 'completed' | 'canceled';
+          image_url?: string;
+          subscriber_count: number;
+          subscribed: boolean;
+        }>
+      >(`/guilds/${guildId}/events`),
+    create: (
+      guildId: string,
+      input: {
+        name: string;
+        description?: string;
+        scheduled_start_at: string;
+        scheduled_end_at?: string;
+        entity_type: 'voice' | 'stage_instance' | 'external';
+        channel_id?: string;
+        entity_location?: string;
+        image_url?: string;
+      },
+    ) =>
+      request<{ id: Snowflake }>(`/guilds/${guildId}/events`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    delete: (eventId: string) => request<void>(`/events/${eventId}`, { method: 'DELETE' }),
+    subscribe: (eventId: string) =>
+      request<void>(`/events/${eventId}/subscribers/me`, { method: 'PUT' }),
+    unsubscribe: (eventId: string) =>
+      request<void>(`/events/${eventId}/subscribers/me`, { method: 'DELETE' }),
+  },
+
+  sounds: {
+    list: (guildId: string) =>
+      request<
+        Array<{
+          id: Snowflake;
+          guild_id: Snowflake;
+          name: string;
+          emoji?: string;
+          file_url: string;
+          volume: number;
+          uploader_id: Snowflake;
+          created_at: string;
+        }>
+      >(`/guilds/${guildId}/sounds`),
+    create: (
+      guildId: string,
+      input: { name: string; emoji?: string; file_url: string; volume?: number },
+    ) =>
+      request<{ id: Snowflake; file_url: string }>(`/guilds/${guildId}/sounds`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    delete: (soundId: string) => request<void>(`/sounds/${soundId}`, { method: 'DELETE' }),
+    play: (soundId: string, channelId: string) =>
+      request<void>(`/sounds/${soundId}/play`, {
+        method: 'POST',
+        body: JSON.stringify({ channel_id: channelId }),
+      }),
+  },
+
+  stageInstances: {
+    create: (input: { channel_id: string; topic: string; privacy_level?: 'guild_only' | 'public' }) =>
+      request<{ channel_id: Snowflake; topic: string }>(`/stage-instances`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    get: (channelId: string) =>
+      request<{ channel_id: Snowflake; topic: string; started_by: Snowflake; started_at: string }>(
+        `/stage-instances/${channelId}`,
+      ),
+    delete: (channelId: string) =>
+      request<void>(`/stage-instances/${channelId}`, { method: 'DELETE' }),
   },
 
   threads: {

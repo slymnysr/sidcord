@@ -144,6 +144,24 @@ func New(h *handlers.Handler, iss *auth.Issuer) http.Handler {
 			r.Get("/guilds/{id}/automod-rules", h.ListAutomodRules)
 			r.Post("/guilds/{id}/automod-rules", h.CreateAutomodRule)
 			r.Delete("/guilds/{id}/automod-rules/{ruleID}", h.DeleteAutomodRule)
+
+			// P2: Stage Instances
+			r.Post("/stage-instances", h.CreateStageInstance)
+			r.Get("/stage-instances/{channelID}", h.GetStageInstance)
+			r.Delete("/stage-instances/{channelID}", h.DeleteStageInstance)
+
+			// P2: Scheduled Events
+			r.Get("/guilds/{id}/events", h.ListGuildEvents)
+			r.Post("/guilds/{id}/events", h.CreateGuildEvent)
+			r.Delete("/events/{id}", h.DeleteGuildEvent)
+			r.Put("/events/{id}/subscribers/me", h.SubscribeEvent)
+			r.Delete("/events/{id}/subscribers/me", h.UnsubscribeEvent)
+
+			// P2: Soundboard
+			r.Get("/guilds/{id}/sounds", h.ListSounds)
+			r.Post("/guilds/{id}/sounds", h.CreateSound)
+			r.Delete("/sounds/{id}", h.DeleteSound)
+			r.Post("/sounds/{id}/play", h.PlaySound)
 		})
 
 		// Webhook execute — anonim (token URL içinde doğrulanır)

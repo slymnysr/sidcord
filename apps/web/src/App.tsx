@@ -107,11 +107,22 @@ export default function App() {
         dispatch(setTyping({ channelId: ev.channel_id, userId: ev.user_id }));
       }
     });
+    // Soundboard event: voice kanaldaki herkes için ses dosyasını çal
+    const offSound = onGuildEvent(guildId, 'SOUNDBOARD_PLAY', (ev: any) => {
+      if (ev?.sound?.file_url) {
+        try {
+          const audio = new Audio(ev.sound.file_url);
+          audio.volume = Math.min(1, Math.max(0, ev.sound.volume ?? 1));
+          audio.play().catch(() => {});
+        } catch {}
+      }
+    });
     const pruneInterval = setInterval(() => dispatch(pruneTyping()), 1000);
     return () => {
       offEdit();
       offDel();
       offReactAdd();
+      offSound();
       offReactRem();
       offTyping();
       clearInterval(pruneInterval);
@@ -363,7 +374,72 @@ function VoiceStage() {
           <ScreenShare size={13} />
           {screenOn ? 'Ekranı Kapat' : 'Ekran Paylaş'}
         </button>
+        {channelId && <SoundboardButton channelId={channelId} />}
       </div>
+    </div>
+  );
+}
+
+function SoundboardButton({ channelId }: { channelId: string }) {
+  const guildId = useAppSelector((s) => s.guilds.selectedId);
+  const [open, setOpen] = useState(false);
+  const [sounds, setSounds] = useState<Awaited<ReturnType<typeof import('./api').api.sounds.list>>>(
+    [],
+  );
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    if (open) document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !guildId) return;
+    import('./api').then(({ api }) => api.sounds.list(guildId).then(setSounds).catch(() => {}));
+  }, [open, guildId]);
+
+  async function play(soundId: string) {
+    const { api } = await import('./api');
+    await api.sounds.play(soundId, channelId).catch(() => {});
+  }
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title="Soundboard"
+        className="h-8 px-3 rounded-md text-xs font-semibold bg-surface-3 hover:bg-surface-1 text-ink-primary flex items-center gap-1.5"
+      >
+        🔊 Soundboard
+      </button>
+      {open && (
+        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-72 bg-surface-1 border border-line rounded-xl shadow-2xl p-2 z-30 max-h-64 overflow-y-auto">
+          {sounds.length === 0 ? (
+            <p className="text-xs text-ink-tertiary p-3 text-center">
+              Henüz ses yok. Sunucu Ayarları &gt; Soundboard ile ekle.
+            </p>
+          ) : (
+            <div className="grid grid-cols-3 gap-2">
+              {sounds.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => play(s.id)}
+                  className="aspect-square flex flex-col items-center justify-center gap-1 rounded-lg bg-surface-2 hover:bg-brand-500/15 transition-colors"
+                  title={s.name}
+                >
+                  <span className="text-2xl">{s.emoji ?? '🔊'}</span>
+                  <span className="text-[10px] truncate w-full px-1 text-center text-ink-primary">
+                    {s.name}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

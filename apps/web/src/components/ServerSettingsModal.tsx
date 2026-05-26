@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Settings, Shield, Ban, Trash2, Plus, Check } from 'lucide-react';
+import { Settings, Shield, Ban, Trash2, Plus, Check, Calendar, Volume2, Play, X } from 'lucide-react';
 import { useAppSelector } from '../store';
 import { api, type APIRole, type APIBan, type APIMember } from '../api';
 import { PERM, PERM_LABELS, has, toggle } from '../perms';
 
-type Tab = 'overview' | 'roles' | 'members' | 'bans';
+type Tab = 'overview' | 'roles' | 'members' | 'bans' | 'events' | 'soundboard';
 
 export function ServerSettingsModal() {
   const guild = useAppSelector((s) => s.guilds.list.find((g) => g.id === s.guilds.selectedId));
@@ -30,6 +30,12 @@ export function ServerSettingsModal() {
         <TabBtn icon={<Ban size={16} />} active={tab === 'bans'} onClick={() => setTab('bans')}>
           Banlanmış
         </TabBtn>
+        <TabBtn icon={<Calendar size={16} />} active={tab === 'events'} onClick={() => setTab('events')}>
+          Etkinlikler
+        </TabBtn>
+        <TabBtn icon={<Volume2 size={16} />} active={tab === 'soundboard'} onClick={() => setTab('soundboard')}>
+          Soundboard
+        </TabBtn>
       </nav>
 
       <div className="flex-1 overflow-y-auto p-6">
@@ -37,6 +43,8 @@ export function ServerSettingsModal() {
         {tab === 'roles' && <RolesTab guildId={guild.id} />}
         {tab === 'members' && <MembersTab guildId={guild.id} />}
         {tab === 'bans' && <BansTab guildId={guild.id} />}
+        {tab === 'events' && <EventsTab guildId={guild.id} />}
+        {tab === 'soundboard' && <SoundboardTab guildId={guild.id} />}
       </div>
     </div>
   );
@@ -464,3 +472,318 @@ function BansTab({ guildId }: { guildId: string }) {
     </div>
   );
 }
+
+function EventsTab({ guildId }: { guildId: string }) {
+  const [events, setEvents] = useState<Awaited<ReturnType<typeof api.events.list>>>([]);
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [start, setStart] = useState('');
+  const [end, setEnd] = useState('');
+  const [entityType, setEntityType] = useState<'voice' | 'stage_instance' | 'external'>('voice');
+  const [channelId, setChannelId] = useState('');
+  const [location, setLocation] = useState('');
+  const channels = useAppSelector((s) => s.channels.byGuild[guildId] ?? []);
+
+  async function refresh() {
+    setEvents(await api.events.list(guildId).catch(() => []));
+  }
+  useEffect(() => {
+    refresh();
+  }, [guildId]);
+
+  async function submit() {
+    try {
+      await api.events.create(guildId, {
+        name,
+        description: description || undefined,
+        scheduled_start_at: new Date(start).toISOString(),
+        scheduled_end_at: end ? new Date(end).toISOString() : undefined,
+        entity_type: entityType,
+        channel_id: entityType !== 'external' ? channelId || undefined : undefined,
+        entity_location: entityType === 'external' ? location : undefined,
+      });
+      setCreating(false);
+      setName('');
+      setDescription('');
+      setStart('');
+      setEnd('');
+      setLocation('');
+      refresh();
+    } catch (e) {
+      console.warn(e);
+    }
+  }
+
+  const voiceOrStage = channels.filter((c) => c.type === 'voice' || c.type === 'stage');
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-2xl font-bold text-ink-primary">Etkinlikler</h2>
+        <button
+          onClick={() => setCreating((v) => !v)}
+          className="bg-brand-500 hover:bg-brand-400 text-white text-sm font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5"
+        >
+          {creating ? <X size={14} /> : <Plus size={14} />}
+          {creating ? 'Vazgeç' : 'Yeni Etkinlik'}
+        </button>
+      </div>
+
+      {creating && (
+        <div className="bg-surface-2 border border-line rounded-xl p-4 mb-5 space-y-3">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Etkinlik adı"
+            className="w-full bg-surface-1 border border-line rounded-lg px-3 py-2 text-ink-primary focus:border-brand-500/50 focus:outline-none"
+          />
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Açıklama (isteğe bağlı)"
+            rows={2}
+            className="w-full bg-surface-1 border border-line rounded-lg px-3 py-2 text-ink-primary focus:border-brand-500/50 focus:outline-none resize-none"
+          />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-ink-tertiary mb-1">Başlangıç</label>
+              <input
+                type="datetime-local"
+                value={start}
+                onChange={(e) => setStart(e.target.value)}
+                className="w-full bg-surface-1 border border-line rounded-lg px-3 py-2 text-sm text-ink-primary"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-ink-tertiary mb-1">Bitiş (opsiyonel)</label>
+              <input
+                type="datetime-local"
+                value={end}
+                onChange={(e) => setEnd(e.target.value)}
+                className="w-full bg-surface-1 border border-line rounded-lg px-3 py-2 text-sm text-ink-primary"
+              />
+            </div>
+          </div>
+          <select
+            value={entityType}
+            onChange={(e) => setEntityType(e.target.value as any)}
+            className="w-full bg-surface-1 border border-line rounded-lg px-3 py-2 text-ink-primary"
+          >
+            <option value="voice">Sesli Kanalda</option>
+            <option value="stage_instance">Sahnede</option>
+            <option value="external">Dış mekan (URL/adres)</option>
+          </select>
+          {entityType !== 'external' ? (
+            <select
+              value={channelId}
+              onChange={(e) => setChannelId(e.target.value)}
+              className="w-full bg-surface-1 border border-line rounded-lg px-3 py-2 text-ink-primary"
+            >
+              <option value="">— Kanal seç —</option>
+              {voiceOrStage.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.type === 'stage' ? '🎤 ' : '🔊 '}
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+              placeholder="https://meet.google.com/... veya adres"
+              className="w-full bg-surface-1 border border-line rounded-lg px-3 py-2 text-ink-primary focus:border-brand-500/50 focus:outline-none"
+            />
+          )}
+          <button
+            onClick={submit}
+            disabled={!name.trim() || !start}
+            className="w-full py-2 rounded-lg bg-brand-500 hover:bg-brand-400 disabled:bg-surface-3 disabled:text-ink-tertiary text-white font-semibold"
+          >
+            Oluştur
+          </button>
+        </div>
+      )}
+
+      {events.length === 0 ? (
+        <p className="text-ink-tertiary text-sm">Henüz etkinlik yok.</p>
+      ) : (
+        <ul className="space-y-2">
+          {events.map((e) => (
+            <li
+              key={e.id}
+              className="bg-surface-2 border border-line rounded-xl p-3 flex items-start gap-3"
+            >
+              <Calendar size={18} className="text-brand-500 mt-0.5 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-ink-primary">{e.name}</div>
+                {e.description && (
+                  <div className="text-xs text-ink-secondary mt-0.5">{e.description}</div>
+                )}
+                <div className="text-xs text-ink-tertiary mt-1">
+                  📅 {new Date(e.scheduled_start_at).toLocaleString('tr-TR')} ·{' '}
+                  {e.subscriber_count} ilgilenen
+                </div>
+                {e.entity_location && (
+                  <div className="text-xs text-ink-tertiary mt-0.5">📍 {e.entity_location}</div>
+                )}
+              </div>
+              <div className="flex gap-1">
+                <button
+                  onClick={() =>
+                    e.subscribed
+                      ? api.events.unsubscribe(e.id).then(refresh)
+                      : api.events.subscribe(e.id).then(refresh)
+                  }
+                  className={
+                    'px-2 py-1 rounded text-xs font-semibold ' +
+                    (e.subscribed
+                      ? 'bg-brand-500/15 text-brand-500'
+                      : 'bg-surface-3 hover:bg-brand-500 hover:text-white text-ink-secondary')
+                  }
+                >
+                  {e.subscribed ? 'İlgileniyorum' : 'İlgileniyorum'}
+                </button>
+                <button
+                  onClick={() => {
+                    if (confirm('Etkinliği silmek istiyor musun?')) {
+                      api.events.delete(e.id).then(refresh);
+                    }
+                  }}
+                  className="px-2 py-1 rounded text-xs bg-surface-3 hover:bg-accent-500 hover:text-white text-ink-secondary"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function SoundboardTab({ guildId }: { guildId: string }) {
+  const [sounds, setSounds] = useState<Awaited<ReturnType<typeof api.sounds.list>>>([]);
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState('');
+  const [emoji, setEmoji] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  async function refresh() {
+    setSounds(await api.sounds.list(guildId).catch(() => []));
+  }
+  useEffect(() => {
+    refresh();
+  }, [guildId]);
+
+  async function submit() {
+    if (!file || !name.trim()) return;
+    setUploading(true);
+    try {
+      const presign = await api.uploads.presign({
+        filename: file.name,
+        content_type: file.type || 'audio/mpeg',
+        size_bytes: file.size,
+      });
+      await fetch(presign.upload_url, {
+        method: 'PUT',
+        body: file,
+        headers: file.type ? { 'Content-Type': file.type } : undefined,
+      });
+      await api.sounds.create(guildId, {
+        name: name.trim(),
+        emoji: emoji || undefined,
+        file_url: presign.public_url,
+      });
+      setName('');
+      setEmoji('');
+      setFile(null);
+      setAdding(false);
+      refresh();
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-2xl font-bold text-ink-primary">Soundboard</h2>
+        <button
+          onClick={() => setAdding((v) => !v)}
+          className="bg-brand-500 hover:bg-brand-400 text-white text-sm font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5"
+        >
+          {adding ? <X size={14} /> : <Plus size={14} />}
+          {adding ? 'Vazgeç' : 'Ses Ekle'}
+        </button>
+      </div>
+
+      {adding && (
+        <div className="bg-surface-2 border border-line rounded-xl p-4 mb-5 space-y-3">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Ses adı (örn. 'Tada')"
+            maxLength={32}
+            className="w-full bg-surface-1 border border-line rounded-lg px-3 py-2 text-ink-primary focus:border-brand-500/50 focus:outline-none"
+          />
+          <input
+            value={emoji}
+            onChange={(e) => setEmoji(e.target.value)}
+            placeholder="Emoji (isteğe bağlı, örn. 🎺)"
+            maxLength={4}
+            className="w-full bg-surface-1 border border-line rounded-lg px-3 py-2 text-ink-primary focus:border-brand-500/50 focus:outline-none"
+          />
+          <input
+            type="file"
+            accept="audio/*"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            className="w-full text-sm text-ink-secondary file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-surface-3 file:text-ink-primary file:font-semibold hover:file:bg-surface-1"
+          />
+          <button
+            onClick={submit}
+            disabled={!file || !name.trim() || uploading}
+            className="w-full py-2 rounded-lg bg-brand-500 hover:bg-brand-400 disabled:bg-surface-3 text-white font-semibold"
+          >
+            {uploading ? 'Yükleniyor...' : 'Yükle'}
+          </button>
+        </div>
+      )}
+
+      {sounds.length === 0 ? (
+        <p className="text-ink-tertiary text-sm">Henüz ses yok.</p>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          {sounds.map((s) => (
+            <div
+              key={s.id}
+              className="bg-surface-2 border border-line rounded-xl p-3 flex items-center gap-2"
+            >
+              <span className="text-2xl shrink-0">{s.emoji ?? '🔊'}</span>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold text-ink-primary truncate">{s.name}</div>
+                <audio src={s.file_url} controls className="w-full h-7 mt-1" />
+              </div>
+              <button
+                onClick={() => {
+                  if (confirm(`"${s.name}" sesini sil?`)) {
+                    api.sounds.delete(s.id).then(refresh);
+                  }
+                }}
+                className="text-ink-tertiary hover:text-accent-500 shrink-0"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Play helper unused yet — voice kanaldayken SoundboardPlayButton kullanır
+void Play;

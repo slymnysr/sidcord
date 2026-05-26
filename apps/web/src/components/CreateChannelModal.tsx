@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Hash, Volume2, Megaphone, MessagesSquare, Mic, Lock, ChevronLeft, FolderTree } from 'lucide-react';
+import { Hash, Volume2, Megaphone, MessagesSquare, Mic, Lock, ChevronLeft, FolderTree, Image as ImageIcon } from 'lucide-react';
 import { api, type APIRole } from '../api';
 import { useAppDispatch, useAppSelector, closeModal, fetchChannels, selectChannel } from '../store';
 
-type ChannelType = 'text' | 'voice' | 'announcement' | 'forum' | 'stage' | 'category';
+type ChannelType = 'text' | 'voice' | 'announcement' | 'forum' | 'stage' | 'category' | 'media';
 
 // Discord paritesi: izin bitmask. ViewChannel = 1 << 10 = 1024
 const VIEW_CHANNEL = '1024';
@@ -14,6 +14,7 @@ const types: { type: ChannelType; icon: any; label: string; description: string 
   { type: 'announcement', icon: Megaphone, label: 'Duyuru', description: 'Yöneticiler yazar, diğerleri okur' },
   { type: 'stage', icon: Mic, label: 'Sahne', description: 'Konuşmacı/dinleyici düzeni' },
   { type: 'forum', icon: MessagesSquare, label: 'Forum', description: 'Konu bazlı tartışma başlatma' },
+  { type: 'media', icon: ImageIcon, label: 'Medya', description: 'Görsel/video paylaşım odaklı' },
   { type: 'category', icon: FolderTree, label: 'Kategori', description: 'Kanalları gruplamak için' },
 ];
 
