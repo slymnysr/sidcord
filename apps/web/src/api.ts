@@ -71,6 +71,7 @@ export interface APIMember {
   avatar_color: string;
   status: 'online' | 'idle' | 'dnd' | 'offline';
   bot: boolean;
+  role_ids: Snowflake[];
 }
 
 export interface APIInvite {

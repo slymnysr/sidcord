@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Settings, Shield, Ban, Trash2, Plus } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Settings, Shield, Ban, Trash2, Plus, Check } from 'lucide-react';
 import { useAppSelector } from '../store';
 import { api, type APIRole, type APIBan, type APIMember } from '../api';
 import { PERM, PERM_LABELS, has, toggle } from '../perms';
@@ -254,6 +254,29 @@ function MembersTab({ guildId }: { guildId: string }) {
     await api.guilds.timeout(guildId, m.user_id, sec);
   }
 
+  async function toggleRole(m: APIMember, roleId: string) {
+    const has = m.role_ids?.includes(roleId);
+    try {
+      if (has) {
+        await api.guilds.unassignRole(guildId, m.user_id, roleId);
+        setMembers((ms) =>
+          ms.map((x) =>
+            x.user_id === m.user_id ? { ...x, role_ids: x.role_ids.filter((r) => r !== roleId) } : x,
+          ),
+        );
+      } else {
+        await api.guilds.assignRole(guildId, m.user_id, roleId);
+        setMembers((ms) =>
+          ms.map((x) =>
+            x.user_id === m.user_id ? { ...x, role_ids: [...(x.role_ids ?? []), roleId] } : x,
+          ),
+        );
+      }
+    } catch (e) {
+      console.warn('toggle role', e);
+    }
+  }
+
   return (
     <div>
       <h2 className="text-2xl font-bold text-ink-primary mb-4">Üyeler ({members.length})</h2>
@@ -270,14 +293,37 @@ function MembersTab({ guildId }: { guildId: string }) {
                 {m.display_name.slice(0, 1).toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-ink-primary font-semibold truncate flex items-center gap-2">
+                <div className="text-ink-primary font-semibold truncate flex items-center gap-2 flex-wrap">
                   {m.display_name}
                   {isOwner && (
                     <span className="bg-yellow-500/20 text-yellow-400 text-[10px] px-1.5 rounded">SAHİP</span>
                   )}
+                  {m.role_ids?.map((rid) => {
+                    const r = roles.find((x) => x.id === rid);
+                    if (!r || r.is_everyone) return null;
+                    return (
+                      <span
+                        key={rid}
+                        className="text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1"
+                        style={{
+                          backgroundColor: `#${r.color.toString(16).padStart(6, '0')}20`,
+                          color: `#${r.color.toString(16).padStart(6, '0')}`,
+                        }}
+                      >
+                        <span
+                          className="w-1.5 h-1.5 rounded-full"
+                          style={{ backgroundColor: `#${r.color.toString(16).padStart(6, '0')}` }}
+                        />
+                        {r.name}
+                      </span>
+                    );
+                  })}
                 </div>
                 <div className="text-xs text-ink-tertiary truncate">@{m.username}</div>
               </div>
+              {!isOwner && (
+                <RoleAssignDropdown member={m} roles={roles} onToggle={(rid) => toggleRole(m, rid)} />
+              )}
               {!isOwner && !isMe && (
                 <div className="flex gap-1">
                   <button
@@ -304,10 +350,68 @@ function MembersTab({ guildId }: { guildId: string }) {
           );
         })}
       </div>
-      {roles.length > 0 && (
-        <p className="text-xs text-ink-tertiary mt-3">
-          {roles.length} rol tanımlı · rol atamayı yakında üye satırından yapacaksın.
-        </p>
+    </div>
+  );
+}
+
+function RoleAssignDropdown({
+  member,
+  roles,
+  onToggle,
+}: {
+  member: APIMember;
+  roles: APIRole[];
+  onToggle: (roleId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    if (open) document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const assignableRoles = roles.filter((r) => !r.is_everyone);
+  if (assignableRoles.length === 0) return null;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="px-2 py-1 rounded text-xs bg-surface-3 hover:bg-brand-500/20 hover:text-brand-500 text-ink-secondary"
+      >
+        Roller
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-56 bg-surface-1 border border-line rounded-xl shadow-2xl p-1 z-30 max-h-64 overflow-y-auto">
+          {assignableRoles.map((r) => {
+            const has = member.role_ids?.includes(r.id);
+            return (
+              <button
+                key={r.id}
+                onClick={() => onToggle(r.id)}
+                className="w-full text-left px-2 py-1.5 rounded hover:bg-surface-2 text-ink-primary text-sm flex items-center gap-2"
+              >
+                <span
+                  className={
+                    'w-4 h-4 rounded border-2 flex items-center justify-center ' +
+                    (has ? 'bg-brand-500 border-brand-500' : 'border-ink-tertiary')
+                  }
+                >
+                  {has && <Check size={10} className="text-white" />}
+                </span>
+                <span
+                  className="w-2 h-2 rounded-full"
+                  style={{ backgroundColor: `#${r.color.toString(16).padStart(6, '0')}` }}
+                />
+                <span className="truncate">{r.name}</span>
+              </button>
+            );
+          })}
+        </div>
       )}
     </div>
   );
