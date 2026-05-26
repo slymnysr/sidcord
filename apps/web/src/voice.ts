@@ -61,6 +61,30 @@ class VoiceClient {
     if (!token) throw new Error('no token');
     if (this.ws) await this.disconnect();
     this.channelId = channelId;
+    // Hata halinde zombi stream kalmaması için cleanup garanti
+    try {
+      await this._doConnect(channelId, token);
+    } catch (e) {
+      try {
+        this.micStream?.getTracks().forEach((t) => t.stop());
+        this.cameraStream?.getTracks().forEach((t) => t.stop());
+        this.screenStream?.getTracks().forEach((t) => t.stop());
+      } catch {}
+      this.micStream = null;
+      this.cameraStream = null;
+      this.screenStream = null;
+      this.channelId = null;
+      if (this.ws) {
+        try {
+          this.ws.close();
+        } catch {}
+        this.ws = null;
+      }
+      throw e;
+    }
+  }
+
+  private async _doConnect(channelId: string, token: string) {
 
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${protocol}//${location.host}/voice-ws/?token=${encodeURIComponent(token)}&channel=${channelId}`;
@@ -359,3 +383,18 @@ class VoiceClient {
 }
 
 export const voice = new VoiceClient();
+
+// Sayfa kapatılırken/yenilenirken ses oturumunu temizle — tarayıcının
+// "zombi" kamera/mikrofon stream tutmaması için
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => {
+    try {
+      voice.disconnect();
+    } catch {}
+  });
+  window.addEventListener('pagehide', () => {
+    try {
+      voice.disconnect();
+    } catch {}
+  });
+}
