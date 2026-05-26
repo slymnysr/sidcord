@@ -417,6 +417,25 @@ export const api = {
     unpin: (messageId: string) => request<void>(`/messages/${messageId}/pin`, { method: 'DELETE' }),
   },
 
+  threads: {
+    create: (
+      channelId: string,
+      input: { name: string; type?: 'public_thread' | 'private_thread'; starter_message_id?: string },
+    ) =>
+      request<APIChannel>(`/channels/${channelId}/threads`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    list: (channelId: string, archived = false) =>
+      request<
+        Array<APIChannel & { archived?: boolean; message_count?: number; member_count?: number; creator_id?: string }>
+      >(`/channels/${channelId}/threads${archived ? '?archived=true' : ''}`),
+    join: (channelId: string) =>
+      request<void>(`/channels/${channelId}/thread-members/me`, { method: 'PUT' }),
+    leave: (channelId: string) =>
+      request<void>(`/channels/${channelId}/thread-members/me`, { method: 'DELETE' }),
+  },
+
   channels: {
     create: (guildId: string, name: string, type = 'text') =>
       request<APIChannel>('/channels', {

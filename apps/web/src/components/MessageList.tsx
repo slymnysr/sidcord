@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Hash, Smile, Pencil, Trash2, Check, X, Pin } from 'lucide-react';
+import { Hash, Smile, Pencil, Trash2, Check, X, Pin, MessagesSquare } from 'lucide-react';
 import {
   useAppDispatch,
   useAppSelector,
@@ -225,6 +225,25 @@ function MessageItem({
     }
   }
 
+  async function startThread() {
+    if (!channelId) return;
+    const name = prompt('Thread adı?');
+    if (!name?.trim()) return;
+    try {
+      const t = await api.threads.create(channelId, {
+        name: name.trim(),
+        type: 'public_thread',
+        starter_message_id: messageId,
+      });
+      // Yeni thread'e gir
+      const guildId = (window as any).__sidcord_guildId;
+      void guildId;
+      dispatch({ type: 'channels/selectChannel', payload: t.id });
+    } catch (e) {
+      console.warn('start thread', e);
+    }
+  }
+
   async function togglePin() {
     try {
       await api.messages.pin(messageId);
@@ -366,6 +385,13 @@ function MessageItem({
           title="Sabitle / Sabitlemeyi Kaldır"
         >
           <Pin size={14} />
+        </button>
+        <button
+          onClick={startThread}
+          className="hover:bg-surface-3 w-7 h-7 flex items-center justify-center text-ink-secondary hover:text-brand-500 rounded"
+          title="Thread Başlat"
+        >
+          <MessagesSquare size={14} />
         </button>
         {isMine && (
           <button

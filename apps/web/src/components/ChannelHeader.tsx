@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Hash, Volume2, Megaphone, MessagesSquare, Mic, Users, UserPlus, Bell, Search, AtSign, Pin, type LucideIcon } from 'lucide-react';
-import { useAppDispatch, useAppSelector, toggleMemberList, openModal, openProfileCard } from '../store';
+import { useAppDispatch, useAppSelector, toggleMemberList, openModal, openProfileCard, selectChannel } from '../store';
 import { api, type APIPublicUser } from '../api';
 
 const Icon: Record<string, LucideIcon> = {
@@ -70,6 +70,7 @@ export function ChannelHeader() {
       </div>
 
       <div className="ml-auto flex items-center gap-2">
+        {channelId && mode !== 'dm' && <ThreadsButton channelId={channelId} />}
         {channelId && mode !== 'dm' && <PinsButton channelId={channelId} />}
         <button
           onClick={() => dispatch(openModal('search'))}
@@ -335,6 +336,75 @@ function PinsButton({ channelId }: { channelId: string }) {
                     </li>
                   );
                 })}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ThreadsButton({ channelId }: { channelId: string }) {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<Awaited<ReturnType<typeof api.threads.list>>>([]);
+  const dispatch = useAppDispatch();
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    if (open) document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    api.threads.list(channelId).then(setItems).catch(() => setItems([]));
+  }, [open, channelId]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title="Thread'ler"
+        className="w-9 h-9 rounded-lg flex items-center justify-center text-ink-secondary hover:bg-surface-2 hover:text-ink-primary transition-colors"
+      >
+        <MessagesSquare size={18} />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-11 w-80 max-h-[420px] flex flex-col bg-surface-1 border border-line rounded-xl shadow-2xl z-30">
+          <div className="px-4 py-3 border-b border-line flex items-center justify-between">
+            <h3 className="font-semibold text-ink-primary text-sm">Aktif Thread'ler</h3>
+            <span className="text-xs text-ink-tertiary">{items.length}</span>
+          </div>
+          <div className="overflow-y-auto flex-1">
+            {items.length === 0 ? (
+              <p className="px-4 py-8 text-center text-sm text-ink-tertiary">
+                Henüz thread yok. Bir mesajın yanındaki 💬 ikonuyla başlat.
+              </p>
+            ) : (
+              <ul>
+                {items.map((t) => (
+                  <li key={t.id}>
+                    <button
+                      onClick={() => {
+                        dispatch(selectChannel(t.id));
+                        setOpen(false);
+                      }}
+                      className="w-full px-4 py-3 text-left border-b border-line hover:bg-surface-2 flex items-start gap-2"
+                    >
+                      <MessagesSquare size={14} className="text-ink-tertiary mt-0.5 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-semibold text-ink-primary truncate">{t.name}</div>
+                        <div className="text-[10px] text-ink-tertiary mt-0.5">
+                          {(t.message_count ?? 0)} mesaj · {(t.member_count ?? 0)} katılımcı
+                        </div>
+                      </div>
+                    </button>
+                  </li>
+                ))}
               </ul>
             )}
           </div>

@@ -47,9 +47,12 @@ func (r *Channels) ByID(ctx context.Context, id int64) (*Channel, error) {
 }
 
 func (r *Channels) ForGuild(ctx context.Context, guildID int64) ([]Channel, error) {
+	// Thread tipleri (public_thread, private_thread, news_thread) sidebar listesinde gözükmez;
+	// ChannelHeader > Thread'ler paneli üzerinden açılır
 	rows, err := r.pool.Query(ctx, `
         SELECT id, guild_id, parent_id, type::text, name, topic, position, nsfw, rate_limit_sec, created_at
         FROM channels WHERE guild_id = $1
+          AND type::text NOT IN ('public_thread', 'private_thread', 'news_thread')
         ORDER BY position ASC, id ASC
     `, guildID)
 	if err != nil {
