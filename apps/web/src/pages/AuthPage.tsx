@@ -33,9 +33,13 @@ export function AuthPage() {
     <div className="min-h-screen flex items-center justify-center bg-bg p-6">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="inline-flex w-16 h-16 rounded-2xl bg-gradient-to-br from-brand-500 to-brand-700 items-center justify-center text-white text-2xl font-bold mb-3">
-            S
-          </div>
+          <img
+            src="/brand/logo.svg"
+            width={56}
+            height={56}
+            alt="Sidcord"
+            className="inline-block mb-3"
+          />
           <h1 className="text-3xl font-bold tracking-tight">Sidcord</h1>
           <p className="text-ink-secondary text-sm mt-1">
             {mode === 'login' ? 'Hesabına giriş yap' : 'Yeni hesap oluştur'}

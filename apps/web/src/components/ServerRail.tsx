@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import clsx from 'clsx';
-import { Plus, Compass, Home } from 'lucide-react';
+import { Plus, Compass } from 'lucide-react';
 import { useAppDispatch, useAppSelector, selectGuild, openModal, setMode } from '../store';
 
 export function ServerRail() {
@@ -28,11 +28,11 @@ export function ServerRail() {
         title="Arkadaşlar / Direkt Mesajlar"
         onClick={() => dispatch(setMode('dm'))}
         className={
-          'w-12 h-12 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 hover:from-brand-400 hover:to-brand-600 flex items-center justify-center text-white transition-all ' +
-          (mode === 'dm' ? 'ring-2 ring-brand-500 ring-offset-2 ring-offset-bg scale-105' : '')
+          'w-12 h-12 rounded-xl bg-surface-1 border border-line hover:border-brand-500/40 hover:scale-105 flex items-center justify-center overflow-hidden transition-all ' +
+          (mode === 'dm' ? 'ring-2 ring-brand-500 ring-offset-2 ring-offset-bg shadow-glow border-brand-500 scale-105' : '')
         }
       >
-        <Home size={22} strokeWidth={2.5} />
+        <img src="/brand/logo.svg" width={36} height={36} alt="" />
       </button>
       <div className="w-8 h-px bg-line" />
 
