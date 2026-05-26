@@ -107,7 +107,41 @@ func New(h *handlers.Handler, iss *auth.Issuer) http.Handler {
 			r.Patch("/channels/{channelID}", h.UpdateChannel)
 			r.Delete("/channels/{channelID}", h.DeleteChannel)
 			r.Get("/guilds/{id}/audit-log", h.ListAuditLogs)
+
+			// P1: Threads
+			r.Post("/channels/{channelID}/threads", h.CreateThread)
+			r.Get("/channels/{channelID}/threads", h.ListThreads)
+			r.Put("/channels/{channelID}/thread-members/me", h.JoinThread)
+			r.Delete("/channels/{channelID}/thread-members/me", h.LeaveThread)
+			r.Patch("/channels/{channelID}/thread-state", h.UpdateThreadState)
+
+			// P1: Custom emojis
+			r.Get("/guilds/{id}/emojis", h.ListEmojis)
+			r.Post("/guilds/{id}/emojis", h.CreateEmoji)
+			r.Delete("/guilds/{id}/emojis/{emojiID}", h.DeleteEmoji)
+
+			// P1: Webhooks
+			r.Get("/channels/{channelID}/webhooks", h.ListWebhooks)
+			r.Post("/channels/{channelID}/webhooks", h.CreateWebhook)
+			r.Delete("/webhooks/{webhookID}", h.DeleteWebhook)
+
+			// P1: Read state
+			r.Get("/users/me/read-states", h.ListReadStates)
+			r.Post("/channels/{channelID}/ack", h.AckChannel)
+
+			// P1: Notification settings
+			r.Get("/users/me/settings", h.GetMySettings)
+			r.Put("/guilds/{id}/notif-settings", h.UpdateGuildNotifSettings)
+			r.Put("/channels/{channelID}/notif-settings", h.UpdateChannelNotifSettings)
+
+			// P1: Group DM
+			r.Post("/users/me/group-channels", h.CreateGroupDM)
+			r.Put("/channels/{channelID}/recipients/{userID}", h.AddGroupDMRecipient)
+			r.Delete("/channels/{channelID}/recipients/{userID}", h.RemoveGroupDMRecipient)
 		})
+
+		// Webhook execute — anonim (token URL içinde doğrulanır)
+		r.Post("/webhooks/{webhookID}/{token}", h.ExecuteWebhook)
 	})
 
 	return r
