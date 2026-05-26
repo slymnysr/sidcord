@@ -152,13 +152,18 @@ export default function App() {
             {dmHubVisible ? (
               <FriendsHub />
             ) : channel?.type === 'voice' ? (
-              <VoiceStage />
+              <>
+                <VoiceStage />
+                <div className="flex-1 min-h-0 border-t border-line">
+                  <MessageList />
+                </div>
+              </>
             ) : (
               <MessageList />
             )}
             {!dmHubVisible && <MessageInput />}
           </div>
-          {showMembers && channel?.type !== 'voice' && mode === 'guild' && <MemberList />}
+          {showMembers && mode === 'guild' && <MemberList />}
         </div>
       </main>
       <Modal />
@@ -285,21 +290,18 @@ function VoiceStage() {
 
   if (!connected) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center bg-gradient-to-b from-bg via-bg to-brand-900/20">
-        <div className="w-24 h-24 rounded-3xl bg-brand-500/10 text-brand-500 flex items-center justify-center mb-6">
-          <Volume2 size={48} strokeWidth={1.5} />
+      <div className="shrink-0 px-5 py-4 border-b border-line bg-surface-1 flex items-center gap-3">
+        <Volume2 size={20} className="text-brand-500 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold text-ink-primary">Sesli sohbet</div>
+          {error && <div className="text-xs text-accent-500 truncate">{error}</div>}
         </div>
-        <h2 className="text-2xl font-bold text-ink-primary mb-2">Sesli kanala katıl</h2>
-        <p className="text-ink-secondary max-w-md text-center px-6">
-          WebRTC + mediasoup SFU. Kamera ve ekran paylaşımı destekli.
-        </p>
-        {error && <p className="text-accent-500 mt-3 text-sm">{error}</p>}
         <button
           onClick={join}
           disabled={busy}
-          className="mt-6 px-6 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-400 disabled:bg-surface-3 text-white font-semibold flex items-center gap-2 transition-colors"
+          className="shrink-0 px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-400 disabled:bg-surface-3 text-white text-sm font-semibold flex items-center gap-2 transition-colors"
         >
-          <PhoneCall size={18} />
+          <PhoneCall size={14} />
           {busy ? 'Bağlanıyor...' : 'Sese Katıl'}
         </button>
       </div>
@@ -322,20 +324,19 @@ function VoiceStage() {
   for (const r of voice.remoteStreams()) if (r.kind === 'audio') audioPeers.add(r.userId);
 
   return (
-    <div className="flex-1 flex flex-col bg-gradient-to-b from-bg via-bg to-brand-900/10 overflow-hidden">
-      <div className="flex-1 p-6 overflow-y-auto">
+    <div className="shrink-0 max-h-[55%] flex flex-col bg-gradient-to-b from-surface-1 via-surface-1 to-brand-900/10 border-b border-line overflow-hidden">
+      <div className="flex-1 p-4 overflow-y-auto min-h-[120px]">
         {videoTiles.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="w-20 h-20 rounded-3xl bg-brand-500/10 text-brand-500 flex items-center justify-center mb-4">
-              <Mic size={36} />
-            </div>
-            <p className="text-ink-secondary">Sadece sesli sohbet. Video açmak için aşağıdaki butonları kullan.</p>
-            {audioPeers.size > 0 && (
-              <p className="text-ink-tertiary text-sm mt-2">{audioPeers.size} kullanıcı bağlı</p>
-            )}
+          <div className="flex items-center justify-center h-full text-center gap-3">
+            <Mic size={20} className="text-brand-500" />
+            <p className="text-sm text-ink-secondary">
+              {audioPeers.size > 0
+                ? `${audioPeers.size + 1} kullanıcı bağlı · video açmak için aşağıdaki butonları kullan`
+                : 'Sesli sohbet aktif · video açmak için aşağıdaki butonları kullan'}
+            </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 auto-rows-fr">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 auto-rows-fr">
             {videoTiles.map((t) => (
               <VideoTile key={t.key} stream={t.stream} label={t.label} isLocal={t.me} />
             ))}
@@ -343,44 +344,44 @@ function VoiceStage() {
         )}
       </div>
 
-      <div className="border-t border-line bg-surface-1 px-6 py-4 flex items-center justify-center gap-3">
+      <div className="border-t border-line bg-surface-2 px-4 py-2.5 flex items-center justify-center gap-2 shrink-0">
         <button
           onClick={toggleMic}
           className={
-            'w-12 h-12 rounded-full flex items-center justify-center transition-colors ' +
-            (micOn ? 'bg-surface-2 hover:bg-surface-3 text-ink-primary' : 'bg-accent-500 hover:bg-accent-600 text-white')
+            'w-9 h-9 rounded-full flex items-center justify-center transition-colors ' +
+            (micOn ? 'bg-surface-3 hover:bg-surface-1 text-ink-primary' : 'bg-accent-500 hover:bg-accent-600 text-white')
           }
           title={micOn ? 'Mikrofonu kapat' : 'Mikrofonu aç'}
         >
-          {micOn ? <Mic size={18} /> : <MicOff size={18} />}
+          {micOn ? <Mic size={15} /> : <MicOff size={15} />}
         </button>
         <button
           onClick={toggleCamera}
           className={
-            'w-12 h-12 rounded-full flex items-center justify-center transition-colors ' +
-            (cameraOn ? 'bg-brand-500 hover:bg-brand-400 text-white' : 'bg-surface-2 hover:bg-surface-3 text-ink-primary')
+            'w-9 h-9 rounded-full flex items-center justify-center transition-colors ' +
+            (cameraOn ? 'bg-brand-500 hover:bg-brand-400 text-white' : 'bg-surface-3 hover:bg-surface-1 text-ink-primary')
           }
           title={cameraOn ? 'Kamerayı kapat' : 'Kamerayı aç'}
         >
-          <Video size={18} />
+          <Video size={15} />
         </button>
         <button
           onClick={toggleScreen}
           className={
-            'w-12 h-12 rounded-full flex items-center justify-center transition-colors ' +
-            (screenOn ? 'bg-brand-500 hover:bg-brand-400 text-white' : 'bg-surface-2 hover:bg-surface-3 text-ink-primary')
+            'w-9 h-9 rounded-full flex items-center justify-center transition-colors ' +
+            (screenOn ? 'bg-brand-500 hover:bg-brand-400 text-white' : 'bg-surface-3 hover:bg-surface-1 text-ink-primary')
           }
           title={screenOn ? 'Ekran paylaşımını kapat' : 'Ekran paylaş'}
         >
-          <ScreenShare size={18} />
+          <ScreenShare size={15} />
         </button>
         <button
           onClick={leave}
           disabled={busy}
-          className="w-12 h-12 rounded-full bg-accent-500 hover:bg-accent-600 text-white flex items-center justify-center transition-colors"
+          className="w-9 h-9 rounded-full bg-accent-500 hover:bg-accent-600 text-white flex items-center justify-center transition-colors"
           title="Sesten ayrıl"
         >
-          <PhoneOff size={18} />
+          <PhoneOff size={15} />
         </button>
       </div>
     </div>
