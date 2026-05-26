@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import clsx from 'clsx';
 import { Plus, Compass } from 'lucide-react';
-import { useAppDispatch, useAppSelector, selectGuild, openModal, setMode } from '../store';
+import { useAppDispatch, useAppSelector, openModal, switchToDM, switchToGuild } from '../store';
 
 export function ServerRail() {
   const guilds = useAppSelector((s) => s.guilds.list);
@@ -26,7 +26,7 @@ export function ServerRail() {
     <aside className="w-[76px] bg-bg flex flex-col items-center py-4 gap-3 border-r border-line">
       <button
         title="Arkadaşlar / Direkt Mesajlar"
-        onClick={() => dispatch(setMode('dm'))}
+        onClick={() => dispatch(switchToDM())}
         className={
           'w-12 h-12 rounded-xl bg-surface-1 border border-line hover:border-brand-500/40 hover:scale-105 flex items-center justify-center overflow-hidden transition-all ' +
           (mode === 'dm' ? 'ring-2 ring-brand-500 ring-offset-2 ring-offset-bg shadow-glow border-brand-500 scale-105' : '')
@@ -47,10 +47,7 @@ export function ServerRail() {
           return (
             <button
               key={g.id}
-              onClick={() => {
-                dispatch(setMode('guild'));
-                dispatch(selectGuild(g.id));
-              }}
+              onClick={() => dispatch(switchToGuild(g.id))}
               title={g.name}
               className={clsx(
                 'relative w-12 h-12 rounded-xl flex items-center justify-center font-bold text-white text-[15px] tracking-tight transition-all duration-200',

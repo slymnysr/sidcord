@@ -28,6 +28,7 @@ import {
   setTyping,
   pruneTyping,
   openProfileCard,
+  openModal,
 } from './store';
 import { tokenStore } from './api';
 import { connectGateway, joinGuild, joinUser, disconnectGateway, onGuildEvent } from './gateway';
@@ -120,6 +121,8 @@ export default function App() {
 
   if (!user) return <AuthPage />;
 
+  const dmHubVisible = mode === 'dm' && !channelId;
+
   return (
     <div className="h-screen flex bg-bg text-ink-primary overflow-hidden">
       <ServerRail />
@@ -128,8 +131,14 @@ export default function App() {
         <ChannelHeader />
         <div className="flex-1 flex min-h-0">
           <div className="flex-1 flex flex-col min-w-0">
-            {channel?.type === 'voice' ? <VoiceStage /> : <MessageList />}
-            <MessageInput />
+            {dmHubVisible ? (
+              <FriendsHub />
+            ) : channel?.type === 'voice' ? (
+              <VoiceStage />
+            ) : (
+              <MessageList />
+            )}
+            {!dmHubVisible && <MessageInput />}
           </div>
           {showMembers && channel?.type !== 'voice' && mode === 'guild' && <MemberList />}
         </div>
@@ -142,6 +151,28 @@ export default function App() {
           onClose={() => dispatch(openProfileCard(null))}
         />
       )}
+    </div>
+  );
+}
+
+function FriendsHub() {
+  const dispatch = useAppDispatch();
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center bg-bg text-center px-6">
+      <div className="w-24 h-24 rounded-3xl bg-brand-500/10 text-brand-500 flex items-center justify-center mb-6">
+        <img src="/brand/logo.svg" width={64} height={64} alt="" />
+      </div>
+      <h2 className="text-2xl font-bold text-ink-primary mb-2">Arkadaşlar</h2>
+      <p className="text-ink-secondary max-w-md mb-6">
+        Soldaki listeden bir konuşma seç veya bir kişiye mesaj göndermek için profil kartından
+        başla.
+      </p>
+      <button
+        onClick={() => dispatch(openModal('friends'))}
+        className="px-5 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-400 text-white font-semibold transition-colors"
+      >
+        Arkadaş Ekle
+      </button>
     </div>
   );
 }

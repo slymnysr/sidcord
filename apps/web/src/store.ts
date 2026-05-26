@@ -108,6 +108,8 @@ const guildsSlice = createSlice({
 interface ChannelsState {
   byGuild: Record<string, APIChannel[]>;
   selectedId: string | null;
+  // Mod başına son seçili kanalı hatırla → mode değişince geri dönünce kullanıcı kaldığı yerden devam eder
+  lastByMode: { guild: Record<string, string | null>; dm: string | null };
   loading: boolean;
 }
 
@@ -121,10 +123,16 @@ export const fetchChannels = createAsyncThunk(
 
 const channelsSlice = createSlice({
   name: 'channels',
-  initialState: { byGuild: {}, selectedId: null, loading: false } as ChannelsState,
+  initialState: { byGuild: {}, selectedId: null, lastByMode: { guild: {}, dm: null }, loading: false } as ChannelsState,
   reducers: {
-    selectChannel(state, action: PayloadAction<string>) {
+    selectChannel(state, action: PayloadAction<string | null>) {
       state.selectedId = action.payload;
+    },
+    rememberGuildChannel(state, action: PayloadAction<{ guildId: string; channelId: string | null }>) {
+      state.lastByMode.guild[action.payload.guildId] = action.payload.channelId;
+    },
+    rememberDMChannel(state, action: PayloadAction<string | null>) {
+      state.lastByMode.dm = action.payload;
     },
   },
   extraReducers: (b) => {
@@ -434,12 +442,49 @@ const uiSlice = createSlice({
 
 export const { logout } = authSlice.actions;
 export const { selectGuild } = guildsSlice.actions;
-export const { selectChannel } = channelsSlice.actions;
+export const { selectChannel, rememberGuildChannel, rememberDMChannel } = channelsSlice.actions;
 export const { pushMessage, updateMessage, removeMessage } = messagesSlice.actions;
 export const { upsertUser } = usersSlice.actions;
 export const { setGuildPresence } = presenceSlice.actions;
 export const { setTyping, pruneTyping } = typingSlice.actions;
 export const { toggleMemberList, openModal, closeModal, setMode, selectDM, openProfileCard, setPendingDM } = uiSlice.actions;
+
+// === Mode switching thunks ===
+// DM moduna geçince çalışan kanalı temizle/son DM'i geri yükle.
+// Guild moduna geçince ilgili guild'in son aktif kanalını geri yükle.
+export const switchToDM = () => (dispatch: AppDispatch, getState: () => RootState) => {
+  const s = getState();
+  const prevGuildId = s.guilds.selectedId;
+  const prevChannelId = s.channels.selectedId;
+  if (s.ui.mode === 'guild' && prevGuildId && prevChannelId) {
+    dispatch(rememberGuildChannel({ guildId: prevGuildId, channelId: prevChannelId }));
+  }
+  dispatch(setMode('dm'));
+  const lastDM = s.channels.lastByMode.dm ?? s.ui.selectedDMChannelId ?? null;
+  dispatch(selectChannel(lastDM));
+  if (lastDM) dispatch(selectDM(lastDM));
+};
+
+export const switchToGuild = (guildId?: string) => (dispatch: AppDispatch, getState: () => RootState) => {
+  const s = getState();
+  if (s.ui.mode === 'dm' && s.channels.selectedId) {
+    dispatch(rememberDMChannel(s.channels.selectedId));
+  }
+  dispatch(setMode('guild'));
+  const gid = guildId ?? s.guilds.selectedId;
+  if (!gid) {
+    dispatch(selectChannel(null));
+    return;
+  }
+  if (guildId) dispatch(selectGuild(guildId));
+  const remembered = s.channels.lastByMode.guild[gid];
+  if (remembered && s.channels.byGuild[gid]?.some((c) => c.id === remembered)) {
+    dispatch(selectChannel(remembered));
+    return;
+  }
+  const firstText = s.channels.byGuild[gid]?.find((c) => c.type !== 'voice');
+  dispatch(selectChannel(firstText?.id ?? null));
+};
 
 export const store = configureStore({
   reducer: {

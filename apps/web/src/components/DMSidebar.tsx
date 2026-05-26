@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { UserPlus, Hash } from 'lucide-react';
 import { api, type APIDMChannel, type APIPublicUser } from '../api';
-import { useAppDispatch, useAppSelector, openModal, selectDM, setMode, selectChannel, setPendingDM } from '../store';
+import { useAppDispatch, useAppSelector, openModal, selectDM, selectChannel, setPendingDM, switchToGuild } from '../store';
 
 export function DMSidebar() {
   const dispatch = useAppDispatch();
@@ -148,7 +148,7 @@ export function DMSidebar() {
 
       <div className="px-2.5 pb-2 border-t border-line pt-2">
         <button
-          onClick={() => dispatch(setMode('guild'))}
+          onClick={() => dispatch(switchToGuild())}
           className="w-full px-2 py-1.5 rounded-md text-xs text-ink-tertiary hover:bg-surface-2 hover:text-ink-primary flex items-center gap-2"
         >
           <Hash size={12} />
