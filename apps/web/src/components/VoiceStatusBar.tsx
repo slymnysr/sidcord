@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Mic, MicOff, PhoneOff, Volume2 } from 'lucide-react';
+import { Mic, MicOff, PhoneOff, Volume2, Headphones, HeadphoneOff } from 'lucide-react';
 import { voice } from '../voice';
 import { useAppSelector } from '../store';
 
@@ -7,33 +7,39 @@ export function useVoiceState() {
   const [connected, setConnected] = useState<boolean>(voice.isConnected());
   const [channelId, setChannelId] = useState<string | null>(voice.channelId);
   const [micOn, setMicOn] = useState<boolean>(voice.isMicrophoneEnabled());
+  const [deafened, setDeafened] = useState<boolean>(voice.isDeafened());
 
   useEffect(() => {
     const onConn = ({ channelId: c }: any) => {
       setConnected(true);
       setChannelId(c);
       setMicOn(voice.isMicrophoneEnabled());
+      setDeafened(voice.isDeafened());
     };
     const onDisc = () => {
       setConnected(false);
       setChannelId(null);
+      setDeafened(false);
     };
     const onMic = ({ enabled }: any) => setMicOn(enabled);
+    const onDeaf = ({ deafened: d }: any) => setDeafened(d);
     voice.on('connected', onConn);
     voice.on('disconnected', onDisc);
     voice.on('mic:changed', onMic);
+    voice.on('deafen:changed', onDeaf);
     return () => {
       voice.off('connected', onConn);
       voice.off('disconnected', onDisc);
       voice.off('mic:changed', onMic);
+      voice.off('deafen:changed', onDeaf);
     };
   }, []);
 
-  return { connected, channelId, micOn };
+  return { connected, channelId, micOn, deafened };
 }
 
 export function VoiceStatusBar() {
-  const { connected, channelId, micOn } = useVoiceState();
+  const { connected, channelId, micOn, deafened } = useVoiceState();
   const guildId = useAppSelector((s) => s.guilds.selectedId);
   const channel = useAppSelector((s) =>
     guildId && channelId ? s.channels.byGuild[guildId]?.find((c) => c.id === channelId) : null,
@@ -76,6 +82,18 @@ export function VoiceStatusBar() {
         }
       >
         {micOn ? <Mic size={14} /> : <MicOff size={14} />}
+      </button>
+      <button
+        onClick={() => voice.setDeafened(!deafened)}
+        title={deafened ? 'Sağırlığı aç' : 'Sağırlaştır (tüm sesi kapat)'}
+        className={
+          'w-7 h-7 rounded-md flex items-center justify-center transition-colors shrink-0 ' +
+          (deafened
+            ? 'bg-accent-500/15 text-accent-500 hover:bg-accent-500/25'
+            : 'text-ink-secondary hover:bg-surface-3 hover:text-ink-primary')
+        }
+      >
+        {deafened ? <HeadphoneOff size={14} /> : <Headphones size={14} />}
       </button>
       <button
         onClick={leave}

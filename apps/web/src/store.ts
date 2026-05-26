@@ -389,6 +389,8 @@ interface UiState {
   profileCardAnchor: { top: number; left: number; right: number; bottom: number; width: number; height: number } | null;
   // Mesajsız ama açık DM (profil kartından "Mesaj" ile gelinen): sidebar'da "Yeni" rozetli pinned satır
   pendingDM: { channelId: string; partnerId: string } | null;
+  // Yanıtlanan mesaj ID (input'un üstünde "Yanıtlanan: @x" gösterimi)
+  replyTo: string | null;
 }
 
 const uiSlice = createSlice({
@@ -402,6 +404,7 @@ const uiSlice = createSlice({
     profileCardUserId: null,
     profileCardAnchor: null,
     pendingDM: null,
+    replyTo: null,
   } as UiState,
   reducers: {
     toggleMemberList(state) {
@@ -434,6 +437,9 @@ const uiSlice = createSlice({
       state.modal = 'channel_perms';
       state.editingChannelId = action.payload;
     },
+    setReplyTo(state, action: PayloadAction<string | null>) {
+      state.replyTo = action.payload;
+    },
     openProfileCard(
       state,
       action: PayloadAction<{ userId: string; anchorRect?: DOMRect | null } | null>,
@@ -459,7 +465,7 @@ export const { pushMessage, updateMessage, removeMessage } = messagesSlice.actio
 export const { upsertUser } = usersSlice.actions;
 export const { setGuildPresence } = presenceSlice.actions;
 export const { setTyping, pruneTyping } = typingSlice.actions;
-export const { toggleMemberList, openModal, closeModal, setMode, selectDM, openProfileCard, setPendingDM, openEditChannel, openChannelPerms } = uiSlice.actions;
+export const { toggleMemberList, openModal, closeModal, setMode, selectDM, openProfileCard, setPendingDM, openEditChannel, openChannelPerms, setReplyTo } = uiSlice.actions;
 
 // === Mode switching thunks ===
 // DM moduna geçince çalışan kanalı temizle/son DM'i geri yükle.

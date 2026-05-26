@@ -505,6 +505,28 @@ export const api = {
       request<void>(`/stage-instances/${channelId}`, { method: 'DELETE' }),
   },
 
+  emojis: {
+    list: (guildId: string) =>
+      request<
+        Array<{
+          id: Snowflake;
+          guild_id: Snowflake;
+          name: string;
+          url: string;
+          animated: boolean;
+          creator_id: Snowflake;
+          created_at: string;
+        }>
+      >(`/guilds/${guildId}/emojis`),
+    create: (guildId: string, input: { name: string; url: string; animated?: boolean }) =>
+      request<{ id: Snowflake }>(`/guilds/${guildId}/emojis`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    delete: (guildId: string, emojiId: string) =>
+      request<void>(`/guilds/${guildId}/emojis/${emojiId}`, { method: 'DELETE' }),
+  },
+
   threads: {
     create: (
       channelId: string,

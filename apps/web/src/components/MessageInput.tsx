@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
-import { Paperclip, Send, X, FileIcon } from 'lucide-react';
+import { Paperclip, Send, X, FileIcon, Smile, AtSign } from 'lucide-react';
 import { api } from '../api';
-import { useAppDispatch, useAppSelector } from '../store';
+import { useAppDispatch, useAppSelector, setReplyTo } from '../store';
 import { sendTyping } from '../gateway';
+import { EmojiPicker } from './EmojiPicker';
+import { MentionPicker } from './MentionPicker';
 
 interface PendingFile {
   id: string;
@@ -28,9 +30,18 @@ export function MessageInput() {
   const [sending, setSending] = useState(false);
   const [files, setFiles] = useState<PendingFile[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [mention, setMention] = useState<{ type: '@' | '#'; q: string; start: number } | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const lastTyping = useRef(0);
+  const replyTo = useAppSelector((s) => s.ui.replyTo);
+  const replyAuthor = useAppSelector((s) =>
+    replyTo && channelId
+      ? s.messages.byChannel[channelId]?.find((m) => m.id === replyTo)?.author_id
+      : null,
+  );
+  const replyAuthorUser = useAppSelector((s) => (replyAuthor ? s.users.byId[replyAuthor] : null));
 
   useEffect(() => {
     setValue('');
@@ -95,17 +106,22 @@ export function MessageInput() {
         content_type: f.file.type,
         size_bytes: f.file.size,
       }));
-      // Sendmessage with attachments via the store thunk
-      await dispatch({
-        type: 'messages/send/pending',
-        meta: { arg: { channelId, content: v } },
-      });
-      const msg = await api.channels.sendMessage(channelId, v || ' ', attachments.length ? attachments : undefined);
-      dispatch({
-        type: 'messages/send/fulfilled',
-        payload: msg,
-        meta: { arg: { channelId, content: v } },
-      });
+      const msg = await fetch(`/api/v1/channels/${channelId}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + localStorage.getItem('sidcord_access'),
+        },
+        body: JSON.stringify({
+          content: v || ' ',
+          attachments: attachments.length ? attachments : undefined,
+          replied_to_id: replyTo ?? undefined,
+        }),
+      }).then((r) => r.json());
+      if (msg && msg.id) {
+        dispatch({ type: 'messages/send/fulfilled', payload: msg, meta: { arg: { channelId, content: v } } });
+      }
+      dispatch(setReplyTo(null));
     } catch {
       setValue(v);
       setFiles(okFiles);
@@ -113,6 +129,64 @@ export function MessageInput() {
       setSending(false);
       ref.current?.focus();
     }
+  }
+
+  function insertAtCaret(text: string) {
+    const el = ref.current;
+    if (!el) {
+      setValue((v) => v + text);
+      return;
+    }
+    const start = el.selectionStart ?? value.length;
+    const end = el.selectionEnd ?? value.length;
+    const next = value.slice(0, start) + text + value.slice(end);
+    setValue(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      const pos = start + text.length;
+      el.setSelectionRange(pos, pos);
+    });
+  }
+
+  function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const v = e.target.value;
+    setValue(v);
+    const now = Date.now();
+    if (guildId && channelId && now - lastTyping.current > 4000) {
+      lastTyping.current = now;
+      sendTyping(guildId, channelId);
+    }
+    // @username veya #channel için trigger algıla
+    const pos = e.target.selectionStart ?? v.length;
+    const before = v.slice(0, pos);
+    const m = before.match(/(^|\s)([@#])([\wçğıöşü-]{0,32})$/i);
+    if (m) {
+      setMention({
+        type: m[2] as '@' | '#',
+        q: m[3] ?? '',
+        start: pos - (m[3]?.length ?? 0) - 1,
+      });
+    } else {
+      setMention(null);
+    }
+  }
+
+  function pickMention(replacement: string) {
+    if (!mention) return;
+    const el = ref.current;
+    const caret = el?.selectionStart ?? value.length;
+    const before = value.slice(0, mention.start);
+    const after = value.slice(caret);
+    const next = before + replacement + ' ' + after;
+    setValue(next);
+    setMention(null);
+    requestAnimationFrame(() => {
+      if (el) {
+        const pos = (before + replacement + ' ').length;
+        el.focus();
+        el.setSelectionRange(pos, pos);
+      }
+    });
   }
 
   return (
@@ -129,9 +203,29 @@ export function MessageInput() {
         onPickFiles(e.dataTransfer.files);
       }}
     >
+      {replyTo && (
+        <div className="bg-surface-2 border border-line border-b-0 rounded-t-xl px-4 py-2 flex items-center justify-between text-xs">
+          <span className="text-ink-secondary truncate">
+            <span className="text-ink-tertiary">Yanıtlanan: </span>
+            <span className="text-brand-500 font-semibold">
+              @{replyAuthorUser?.display_name ?? '…'}
+            </span>
+          </span>
+          <button
+            type="button"
+            onClick={() => dispatch(setReplyTo(null))}
+            className="text-ink-tertiary hover:text-accent-500"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       <div
         className={
-          'bg-surface-2 rounded-2xl border transition-colors ' +
+          'bg-surface-2 border transition-colors ' +
+          (replyTo ? 'rounded-b-2xl rounded-t-none border-t-0' : 'rounded-2xl') +
+          ' ' +
           (dragOver
             ? 'border-brand-500 shadow-glow'
             : 'border-line focus-within:border-brand-500/50 focus-within:shadow-glow')
@@ -144,7 +238,15 @@ export function MessageInput() {
             ))}
           </div>
         )}
-        <div className="flex items-end px-4 py-3 gap-3">
+        {mention && (
+          <MentionPicker
+            type={mention.type}
+            query={mention.q}
+            onPick={pickMention}
+            onClose={() => setMention(null)}
+          />
+        )}
+        <div className="flex items-end px-4 py-3 gap-2 relative">
           <button
             type="button"
             onClick={() => fileInput.current?.click()}
@@ -163,26 +265,67 @@ export function MessageInput() {
           <textarea
             ref={ref}
             value={value}
-            onChange={(e) => {
-              setValue(e.target.value);
-              // 4 saniyede bir typing event
-              const now = Date.now();
-              if (guildId && channelId && now - lastTyping.current > 4000) {
-                lastTyping.current = now;
-                sendTyping(guildId, channelId);
-              }
-            }}
+            onChange={handleInputChange}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
+              if (e.key === 'Enter' && !e.shiftKey && !mention) {
                 e.preventDefault();
                 submit();
               }
+              if (e.key === 'Escape' && replyTo) {
+                dispatch(setReplyTo(null));
+              }
             }}
-            placeholder={`#${channel.name} kanalına yaz...`}
+            placeholder={
+              replyTo
+                ? `Yanıtla #${channel.name}...`
+                : `#${channel.name} kanalına yaz...`
+            }
             rows={1}
             disabled={sending}
             className="flex-1 bg-transparent text-ink-primary placeholder:text-ink-tertiary outline-none resize-none max-h-40 text-[15px] leading-snug py-1"
           />
+          <button
+            type="button"
+            onClick={() => {
+              if (ref.current) {
+                const el = ref.current;
+                const before = value.slice(0, el.selectionStart ?? value.length);
+                if (!before.endsWith('@') && !before.endsWith(' @') && before !== '') {
+                  insertAtCaret(before.endsWith(' ') || before === '' ? '@' : ' @');
+                } else if (before === '') {
+                  insertAtCaret('@');
+                }
+              }
+            }}
+            className="text-ink-secondary hover:text-brand-500 transition-colors shrink-0"
+            title="Birini bahset"
+          >
+            <AtSign size={18} />
+          </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setEmojiOpen((v) => !v)}
+              className="text-ink-secondary hover:text-brand-500 transition-colors shrink-0"
+              title="Emoji"
+            >
+              <Smile size={20} />
+            </button>
+            {emojiOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setEmojiOpen(false)} />
+                <div className="absolute bottom-9 right-0 z-20">
+                  <EmojiPicker
+                    onPick={(e) => {
+                      insertAtCaret(e);
+                      // Sticky picker — Discord davranışı, kapatma yok
+                    }}
+                    onClose={() => setEmojiOpen(false)}
+                  />
+                </div>
+              </>
+            )}
+          </div>
           <button
             onClick={submit}
             disabled={(!value.trim() && files.length === 0) || sending || files.some((f) => f.uploading)}

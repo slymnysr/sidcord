@@ -211,6 +211,24 @@ class VoiceClient {
     this.emit('mic:changed', { enabled });
   }
 
+  private deafened = false;
+
+  // Deafen: tüm remote audio'ları sustur + mikrofonu da kapat (Discord davranışı)
+  setDeafened(deaf: boolean) {
+    this.deafened = deaf;
+    for (const el of this.remoteAudioEls.values()) {
+      el.muted = deaf;
+    }
+    if (deaf) {
+      this.setMicrophoneEnabled(false);
+    }
+    this.emit('deafen:changed', { deafened: deaf });
+  }
+
+  isDeafened(): boolean {
+    return this.deafened;
+  }
+
   isConnected(): boolean {
     return this.channelId != null && !!this.audioProducer;
   }

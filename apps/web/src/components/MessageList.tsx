@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Hash, Smile, Pencil, Trash2, Check, X, Pin, MessagesSquare } from 'lucide-react';
+import { Hash, Smile, Pencil, Trash2, Check, X, Pin, MessagesSquare, Reply } from 'lucide-react';
 import {
   useAppDispatch,
   useAppSelector,
@@ -9,6 +9,7 @@ import {
   removeMessage,
   openProfileCard,
   upsertUser,
+  setReplyTo,
 } from '../store';
 import { api, type APIReaction, type APIAttachment, type APIUser } from '../api';
 import { Markdown } from '../markdown';
@@ -378,6 +379,13 @@ function MessageItem({
           title="Tepki ekle"
         >
           <Smile size={14} />
+        </button>
+        <button
+          onClick={() => dispatch(setReplyTo(messageId))}
+          className="hover:bg-surface-3 w-7 h-7 flex items-center justify-center text-ink-secondary hover:text-brand-500 rounded"
+          title="Yanıtla"
+        >
+          <Reply size={14} />
         </button>
         <button
           onClick={togglePin}
