@@ -38,7 +38,7 @@ export function MessageInput() {
     ref.current?.focus();
   }, [channelId]);
 
-  if (!channel || channel.type === 'voice') return null;
+  if (!channel) return null;
 
   async function uploadFile(file: File): Promise<PendingFile> {
     const id = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;

@@ -82,15 +82,17 @@ export function MessageList() {
 
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-4">
-      <div className="mb-6 pb-6 border-b border-line">
-        <div className="w-14 h-14 rounded-2xl bg-brand-500/15 text-brand-500 flex items-center justify-center mb-3">
-          <Hash size={28} strokeWidth={2.5} />
+      {channel.type !== 'voice' && (
+        <div className="mb-6 pb-6 border-b border-line">
+          <div className="w-14 h-14 rounded-2xl bg-brand-500/15 text-brand-500 flex items-center justify-center mb-3">
+            <Hash size={28} strokeWidth={2.5} />
+          </div>
+          <h1 className="text-2xl font-bold text-ink-primary tracking-tight">#{channel.name}</h1>
+          <p className="text-ink-secondary text-sm mt-1">
+            Bu, <span className="text-ink-primary font-medium">#{channel.name}</span> kanalının başlangıcı.
+          </p>
         </div>
-        <h1 className="text-2xl font-bold text-ink-primary tracking-tight">#{channel.name}</h1>
-        <p className="text-ink-secondary text-sm mt-1">
-          Bu, <span className="text-ink-primary font-medium">#{channel.name}</span> kanalının başlangıcı.
-        </p>
-      </div>
+      )}
 
       {list.length === 0 && (
         <div className="text-center text-ink-tertiary py-16">
