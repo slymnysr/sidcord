@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { UserPlus, Hash } from 'lucide-react';
 import { api, type APIDMChannel, type APIPublicUser } from '../api';
 import { useAppDispatch, useAppSelector, openModal, selectDM, selectChannel, setPendingDM, switchToGuild } from '../store';
+import { VoiceStatusBar } from './VoiceStatusBar';
 
 export function DMSidebar() {
   const dispatch = useAppDispatch();
@@ -155,6 +156,7 @@ export function DMSidebar() {
           Sunucu görünümüne dön
         </button>
       </div>
+      <VoiceStatusBar />
     </aside>
   );
 }

@@ -115,6 +115,7 @@ class VoiceClient {
       appData: { source: 'mic' },
     });
     this.producerSource.set(this.audioProducer.id, 'mic');
+    this.emit('connected', { channelId });
   }
 
   async publishCamera(): Promise<MediaStream> {
@@ -175,6 +176,15 @@ class VoiceClient {
     if (!this.audioProducer) return;
     if (enabled) this.audioProducer.resume();
     else this.audioProducer.pause();
+    this.emit('mic:changed', { enabled });
+  }
+
+  isConnected(): boolean {
+    return this.channelId != null && !!this.audioProducer;
+  }
+
+  isMicrophoneEnabled(): boolean {
+    return this.audioProducer ? !this.audioProducer.paused : true;
   }
 
   async disconnect() {

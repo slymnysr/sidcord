@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Volume2, ScreenShare, Video, PhoneCall, Mic, MicOff, PhoneOff } from 'lucide-react';
+import { Volume2, ScreenShare, Video, PhoneCall, Mic } from 'lucide-react';
 import { voice } from './voice';
 import { ServerRail } from './components/ServerRail';
 import { ChannelList } from './components/ChannelList';
@@ -204,7 +204,6 @@ function VoiceStage() {
   const channelId = useAppSelector((s) => s.channels.selectedId);
   const me = useAppSelector((s) => s.auth.user);
   const [connected, setConnected] = useState(voice.channelId === channelId);
-  const [micOn, setMicOn] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
@@ -217,13 +216,23 @@ function VoiceStage() {
     const onChange = () => force((n) => n + 1);
     const onCamera = ({ stream }: any) => setLocalCamera(stream);
     const onScreen = ({ stream }: any) => setLocalScreen(stream);
+    const onConn = () => setConnected(true);
+    const onDisc = () => {
+      setConnected(false);
+      setCameraOn(false);
+      setScreenOn(false);
+    };
     voice.on('remotes:changed', onChange);
     voice.on('local:camera', onCamera);
     voice.on('local:screen', onScreen);
+    voice.on('connected', onConn);
+    voice.on('disconnected', onDisc);
     return () => {
       voice.off('remotes:changed', onChange);
       voice.off('local:camera', onCamera);
       voice.off('local:screen', onScreen);
+      voice.off('connected', onConn);
+      voice.off('disconnected', onDisc);
     };
   }, []);
 
@@ -236,18 +245,6 @@ function VoiceStage() {
       setConnected(true);
     } catch (e: any) {
       setError(e?.message || 'Sese katılamadı');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function leave() {
-    setBusy(true);
-    try {
-      await voice.disconnect();
-      setConnected(false);
-      setCameraOn(false);
-      setScreenOn(false);
     } finally {
       setBusy(false);
     }
@@ -281,11 +278,6 @@ function VoiceStage() {
         setError(e?.message || 'Ekran paylaşılamadı');
       }
     }
-  }
-
-  function toggleMic() {
-    voice.setMicrophoneEnabled(!micOn);
-    setMicOn(!micOn);
   }
 
   if (!connected) {
@@ -344,44 +336,32 @@ function VoiceStage() {
         )}
       </div>
 
-      <div className="border-t border-line bg-surface-2 px-4 py-2.5 flex items-center justify-center gap-2 shrink-0">
-        <button
-          onClick={toggleMic}
-          className={
-            'w-9 h-9 rounded-full flex items-center justify-center transition-colors ' +
-            (micOn ? 'bg-surface-3 hover:bg-surface-1 text-ink-primary' : 'bg-accent-500 hover:bg-accent-600 text-white')
-          }
-          title={micOn ? 'Mikrofonu kapat' : 'Mikrofonu aç'}
-        >
-          {micOn ? <Mic size={15} /> : <MicOff size={15} />}
-        </button>
+      <div className="border-t border-line bg-surface-2 px-4 py-2 flex items-center justify-center gap-2 shrink-0">
         <button
           onClick={toggleCamera}
           className={
-            'w-9 h-9 rounded-full flex items-center justify-center transition-colors ' +
-            (cameraOn ? 'bg-brand-500 hover:bg-brand-400 text-white' : 'bg-surface-3 hover:bg-surface-1 text-ink-primary')
+            'h-8 px-3 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-colors ' +
+            (cameraOn
+              ? 'bg-brand-500 hover:bg-brand-400 text-white'
+              : 'bg-surface-3 hover:bg-surface-1 text-ink-primary')
           }
           title={cameraOn ? 'Kamerayı kapat' : 'Kamerayı aç'}
         >
-          <Video size={15} />
+          <Video size={13} />
+          {cameraOn ? 'Kamerayı Kapat' : 'Kamera'}
         </button>
         <button
           onClick={toggleScreen}
           className={
-            'w-9 h-9 rounded-full flex items-center justify-center transition-colors ' +
-            (screenOn ? 'bg-brand-500 hover:bg-brand-400 text-white' : 'bg-surface-3 hover:bg-surface-1 text-ink-primary')
+            'h-8 px-3 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-colors ' +
+            (screenOn
+              ? 'bg-brand-500 hover:bg-brand-400 text-white'
+              : 'bg-surface-3 hover:bg-surface-1 text-ink-primary')
           }
           title={screenOn ? 'Ekran paylaşımını kapat' : 'Ekran paylaş'}
         >
-          <ScreenShare size={15} />
-        </button>
-        <button
-          onClick={leave}
-          disabled={busy}
-          className="w-9 h-9 rounded-full bg-accent-500 hover:bg-accent-600 text-white flex items-center justify-center transition-colors"
-          title="Sesten ayrıl"
-        >
-          <PhoneOff size={15} />
+          <ScreenShare size={13} />
+          {screenOn ? 'Ekranı Kapat' : 'Ekran Paylaş'}
         </button>
       </div>
     </div>

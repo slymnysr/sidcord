@@ -28,6 +28,7 @@ import {
   openEditChannel,
 } from '../store';
 import { api, type APIChannel } from '../api';
+import { VoiceStatusBar } from './VoiceStatusBar';
 
 const ChannelIcon: Record<string, LucideIcon> = {
   text: Hash,
@@ -127,6 +128,7 @@ export function ChannelList() {
         )}
       </div>
 
+      <VoiceStatusBar />
       <UserPanel />
     </aside>
   );
