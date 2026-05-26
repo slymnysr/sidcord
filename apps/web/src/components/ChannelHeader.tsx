@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Hash, Volume2, Megaphone, MessagesSquare, Mic, Users, UserPlus, Bell, Search, AtSign, type LucideIcon } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Hash, Volume2, Megaphone, MessagesSquare, Mic, Users, UserPlus, Bell, Search, AtSign, Pin, type LucideIcon } from 'lucide-react';
 import { useAppDispatch, useAppSelector, toggleMemberList, openModal, openProfileCard } from '../store';
 import { api, type APIPublicUser } from '../api';
 
@@ -70,6 +70,7 @@ export function ChannelHeader() {
       </div>
 
       <div className="ml-auto flex items-center gap-2">
+        {channelId && mode !== 'dm' && <PinsButton channelId={channelId} />}
         <button
           onClick={() => dispatch(openModal('search'))}
           title="Ara"
@@ -251,4 +252,94 @@ function formatRel(d: Date): string {
   const days = Math.floor(h / 24);
   if (days < 7) return `${days} gün önce`;
   return d.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' });
+}
+
+function PinsButton({ channelId }: { channelId: string }) {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<import('../api').APIMessage[]>([]);
+  const users = useAppSelector((s) => s.users.byId);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    if (open) document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    api.channels.pins(channelId).then(setItems).catch(() => {});
+  }, [open, channelId]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title="Sabitlenmiş mesajlar"
+        className="w-9 h-9 rounded-lg flex items-center justify-center text-ink-secondary hover:bg-surface-2 hover:text-ink-primary transition-colors"
+      >
+        <Pin size={18} />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-11 w-96 max-h-[500px] flex flex-col bg-surface-1 border border-line rounded-xl shadow-2xl z-30">
+          <div className="px-4 py-3 border-b border-line">
+            <h3 className="font-semibold text-ink-primary text-sm">Sabitlenmiş Mesajlar</h3>
+          </div>
+          <div className="overflow-y-auto flex-1">
+            {items.length === 0 ? (
+              <p className="px-4 py-8 text-center text-sm text-ink-tertiary">
+                Bu kanalda sabitlenmiş mesaj yok.
+              </p>
+            ) : (
+              <ul>
+                {items.map((m) => {
+                  const u = users[m.author_id];
+                  const name = u?.display_name ?? '…';
+                  const color = u?.avatar_color ?? '#6B7280';
+                  return (
+                    <li key={m.id} className="px-4 py-3 border-b border-line hover:bg-surface-2">
+                      <div className="flex gap-2.5 items-start">
+                        <div
+                          className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
+                          style={{ backgroundColor: color }}
+                        >
+                          {name.slice(0, 1).toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-baseline gap-2">
+                            <span className="text-sm font-semibold text-ink-primary">{name}</span>
+                            <span className="text-[10px] text-ink-tertiary">
+                              {new Date(m.created_at).toLocaleDateString('tr-TR', {
+                                day: '2-digit',
+                                month: 'short',
+                              })}
+                            </span>
+                          </div>
+                          <p className="text-sm text-ink-secondary break-words mt-0.5 whitespace-pre-wrap line-clamp-3">
+                            {m.content}
+                          </p>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            await api.messages.unpin(m.id).catch(() => {});
+                            setItems((xs) => xs.filter((x) => x.id !== m.id));
+                          }}
+                          title="Sabitlemeyi kaldır"
+                          className="text-ink-tertiary hover:text-accent-500 text-xs shrink-0"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }

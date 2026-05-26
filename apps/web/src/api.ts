@@ -413,6 +413,8 @@ export const api = {
       }),
     delete: (messageId: string) =>
       request<void>(`/messages/${messageId}`, { method: 'DELETE' }),
+    pin: (messageId: string) => request<void>(`/messages/${messageId}/pin`, { method: 'PUT' }),
+    unpin: (messageId: string) => request<void>(`/messages/${messageId}/pin`, { method: 'DELETE' }),
   },
 
   channels: {
@@ -465,6 +467,7 @@ export const api = {
       request<void>(`/channels/${channelId}/overrides/${targetType}/${targetId}`, {
         method: 'DELETE',
       }),
+    pins: (channelId: string) => request<APIMessage[]>(`/channels/${channelId}/pins`),
     messages: (channelId: string, before?: string, limit = 50) => {
       const q = new URLSearchParams();
       if (before) q.set('before', before);

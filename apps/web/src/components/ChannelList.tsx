@@ -80,12 +80,64 @@ export function ChannelList() {
   }
   uncategorized.sort((a, b) => a.position - b.position);
 
-  function renderChannel(ch: APIChannel) {
+  async function onDropChannel(
+    e: React.DragEvent,
+    target: { parentId: string | null; siblings: APIChannel[] },
+    beforeId?: string,
+  ) {
+    e.preventDefault();
+    const draggedId = e.dataTransfer.getData('text/sidcord-channel');
+    if (!draggedId || !guildId) return;
+    const dragged = all.find((c) => c.id === draggedId);
+    if (!dragged || dragged.type === 'category') return;
+    // Yeni sıraya göre position hesapla: hedef siblings içine sırasıyla yeniden
+    // yerleştir. Basit: dragged'i siblings'ten çıkar, beforeId'nin önüne ekle,
+    // tüm pozisyonları yeniden ata.
+    const list = target.siblings.filter((c) => c.id !== draggedId);
+    let insertIdx = list.length;
+    if (beforeId) {
+      const idx = list.findIndex((c) => c.id === beforeId);
+      if (idx >= 0) insertIdx = idx;
+    }
+    list.splice(insertIdx, 0, dragged);
+    // Backend'e parent_id + position güncellemesi gönder
+    try {
+      await api.channels.update(draggedId, {
+        parent_id: target.parentId ?? '',
+      });
+      for (let i = 0; i < list.length; i++) {
+        const c = list[i];
+        if (c.position !== i) {
+          await api.channels.update(c.id, { position: i });
+        }
+      }
+      await dispatch(fetchChannels(guildId));
+    } catch (err) {
+      console.warn('drop channel', err);
+    }
+  }
+
+  function renderChannel(ch: APIChannel, siblings: APIChannel[], parentId: string | null) {
     const active = ch.id === selectedId;
     const Icon = ChannelIcon[ch.type] ?? Hash;
     const connected = ch.type === 'voice' ? voiceByChannel[ch.id] ?? [] : [];
     return (
-      <li key={ch.id} className="relative">
+      <li
+        key={ch.id}
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData('text/sidcord-channel', ch.id);
+          e.dataTransfer.effectAllowed = 'move';
+        }}
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes('text/sidcord-channel')) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+          }
+        }}
+        onDrop={(e) => onDropChannel(e, { parentId, siblings }, ch.id)}
+        className="relative"
+      >
         {active && (
           <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 bg-brand-500 rounded-r-full" />
         )}
@@ -131,7 +183,17 @@ export function ChannelList() {
         )}
 
         {/* Kategorisiz kanallar üstte */}
-        {uncategorized.length > 0 && <ul className="space-y-0.5">{uncategorized.map(renderChannel)}</ul>}
+        {uncategorized.length > 0 && (
+          <ul
+            className="space-y-0.5"
+            onDragOver={(e) => {
+              if (e.dataTransfer.types.includes('text/sidcord-channel')) e.preventDefault();
+            }}
+            onDrop={(e) => onDropChannel(e, { parentId: null, siblings: uncategorized })}
+          >
+            {uncategorized.map((ch) => renderChannel(ch, uncategorized, null))}
+          </ul>
+        )}
 
         {/* Kategoriler ve altlarındaki kanallar */}
         {categories.map((cat) => (
@@ -139,7 +201,8 @@ export function ChannelList() {
             key={cat.id}
             category={cat}
             children={byParent[cat.id] ?? []}
-            renderChannel={renderChannel}
+            renderChannel={(ch) => renderChannel(ch, byParent[cat.id] ?? [], cat.id)}
+            onDropEmpty={(e) => onDropChannel(e, { parentId: cat.id, siblings: byParent[cat.id] ?? [] })}
           />
         ))}
       </div>
@@ -154,10 +217,12 @@ function CategorySection({
   category,
   children,
   renderChannel,
+  onDropEmpty,
 }: {
   category: APIChannel;
   children: APIChannel[];
   renderChannel: (ch: APIChannel) => React.ReactNode;
+  onDropEmpty: (e: React.DragEvent) => void;
 }) {
   const dispatch = useAppDispatch();
   const [collapsed, setCollapsed] = useState(false);
@@ -194,7 +259,17 @@ function CategorySection({
           +
         </button>
       </div>
-      {!collapsed && children.length > 0 && <ul className="space-y-0.5">{children.map(renderChannel)}</ul>}
+      {!collapsed && (
+        <ul
+          className="space-y-0.5 min-h-[8px]"
+          onDragOver={(e) => {
+            if (e.dataTransfer.types.includes('text/sidcord-channel')) e.preventDefault();
+          }}
+          onDrop={onDropEmpty}
+        >
+          {children.map(renderChannel)}
+        </ul>
+      )}
       {menu && (
         <ChannelContextMenu
           channel={category}

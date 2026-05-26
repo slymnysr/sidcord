@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Hash, Smile, Pencil, Trash2, Check, X } from 'lucide-react';
+import { Hash, Smile, Pencil, Trash2, Check, X, Pin } from 'lucide-react';
 import {
   useAppDispatch,
   useAppSelector,
@@ -225,6 +225,19 @@ function MessageItem({
     }
   }
 
+  async function togglePin() {
+    try {
+      await api.messages.pin(messageId);
+    } catch (e) {
+      // Zaten pin'liyse unpin'le
+      try {
+        await api.messages.unpin(messageId);
+      } catch (e2) {
+        console.warn('pin toggle', e2);
+      }
+    }
+  }
+
   return (
     <li className="flex gap-3 group relative px-2 -mx-2 py-1 hover:bg-surface-1/40 rounded">
       {!grouped ? (
@@ -346,6 +359,13 @@ function MessageItem({
           title="Tepki ekle"
         >
           <Smile size={14} />
+        </button>
+        <button
+          onClick={togglePin}
+          className="hover:bg-surface-3 w-7 h-7 flex items-center justify-center text-ink-secondary hover:text-brand-500 rounded"
+          title="Sabitle / Sabitlemeyi Kaldır"
+        >
+          <Pin size={14} />
         </button>
         {isMine && (
           <button
