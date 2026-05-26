@@ -1,0 +1,84 @@
+# Sidcord geliştirme ortamı veritabanları
+# Kullanım: docker compose -f infra/docker/docker-compose.yml up -d
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sidcord-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sidcord
+      POSTGRES_PASSWORD: sidcord_dev
+      POSTGRES_DB: sidcord
+    ports:
+      - "5433:5432"  # lokal postgres 5432'yi tutuyor, çakışmayı önle
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sidcord"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: sidcord-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  scylla:
+    image: scylladb/scylla:5.4
+    container_name: sidcord-scylla
+    restart: unless-stopped
+    ports:
+      - "9042:9042"  # CQL
+      - "9160:9160"  # Thrift
+      - "10000:10000"  # REST API
+    volumes:
+      - scylla_data:/var/lib/scylla
+    command:
+      - --smp=1
+      - --memory=1G
+      - --overprovisioned=1
+      - --developer-mode=1
+    healthcheck:
+      test: ["CMD", "cqlsh", "-e", "describe cluster"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  # Yerel obje deposu (S3 uyumlu) — geliştirmede Cloudflare R2 yerine
+  minio:
+    image: minio/minio:latest
+    container_name: sidcord-minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: sidcord
+      MINIO_ROOT_PASSWORD: sidcord_dev_minio
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
+  scylla_data:
+  minio_data:

@@ -1,0 +1,17 @@
+ALTER TABLE guilds DROP COLUMN IF EXISTS icon_url_v2;
+ALTER TABLE guilds DROP COLUMN IF EXISTS banner_url;
+ALTER TABLE guilds DROP COLUMN IF EXISTS vanity_url_code;
+ALTER TABLE channels DROP COLUMN IF EXISTS icon_url;
+ALTER TABLE channels DROP COLUMN IF EXISTS user_limit;
+ALTER TABLE channels DROP COLUMN IF EXISTS bitrate;
+ALTER TABLE users DROP COLUMN IF EXISTS banner_url;
+DROP TABLE IF EXISTS channel_user_throttle;
+DROP TABLE IF EXISTS login_attempts;
+DROP TABLE IF EXISTS audit_logs;
+DROP TYPE IF EXISTS audit_action;
+ALTER TABLE users DROP COLUMN IF EXISTS custom_status_expires_at;
+ALTER TABLE users DROP COLUMN IF EXISTS custom_status_emoji;
+ALTER TABLE users DROP COLUMN IF EXISTS custom_status_text;
+ALTER TABLE messages DROP COLUMN IF EXISTS mention_everyone;
+DROP INDEX IF EXISTS idx_messages_replied_to;
+ALTER TABLE messages DROP COLUMN IF EXISTS replied_to_id;

@@ -1,0 +1,140 @@
+# ===== Dependencies =====
+node_modules/
+.pnpm-store/
+
+# ===== Build outputs =====
+dist/
+build/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# ===== Elixir / Phoenix =====
+_build/
+deps/
+*.beam
+*.ez
+erl_crash.dump
+.elixir_ls/
+.lexical/
+.fetch
+priv/static/assets/
+priv/static/cache_manifest.json
+
+# ===== Go =====
+bin/
+*.exe
+vendor/
+*.test
+*.prof
+
+# ===== Env / Secrets =====
+.env
+.env.local
+.env.*.local
+!.env.example
+*.pem
+*.key
+secrets/
+.envrc
+
+# ===== IDE / Editor =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.zed/
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== Logs =====
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ===== Docker / Compose =====
+.docker/
+docker-compose.override.yml
+
+# ===== Test / Coverage =====
+coverage/
+.nyc_output/
+*.coverprofile
+junit.xml
+
+# ===== Mobile (React Native) =====
+apps/mobile/.expo/
+apps/mobile/android/build/
+apps/mobile/android/.gradle/
+apps/mobile/android/app/build/
+apps/mobile/ios/build/
+apps/mobile/ios/Pods/
+apps/mobile/ios/*.xcworkspace/xcuserdata/
+
+# ===== Desktop (Electron / Tauri) =====
+apps/desktop/dist-electron/
+apps/desktop/release/
+apps/desktop/src-tauri/target/
+
+# ===== Voice service =====
+apps/voice/dist/
+
+# ===== Mediasoup prebuilds (downloaded postinstall) =====
+**/node_modules/mediasoup/worker/prebuild/
+**/node_modules/mediasoup/worker/out/
+
+# ===== Database & local data =====
+*.sqlite
+*.sqlite3
+*.db
+infra/docker/postgres_data/
+infra/docker/redis_data/
+infra/docker/scylla_data/
+infra/docker/minio_data/
+
+# ===== Migration generated files =====
+apps/api/internal/db/sqlc/  # eğer gelecekte sqlc kullanırsak
+apps/api/migrations/*.bak
+
+# ===== Local proto generated =====
+packages/proto/gen/
+
+# ===== Temp / cache =====
+tmp/
+.tmp/
+.cache/
+*.bak
+*.orig
+
+# ===== Process PIDs (geliştirme) =====
+/tmp/sidcord-*.pid
+/tmp/sidcord-*.log
+
+# ===== TLS / Certs =====
+*.crt
+*.cert
+*.csr
+ssl/
+
+# ===== Backup =====
+backups/
+*.dump
+*.sql.gz
+
+# ===== AI / Editor assistants =====
+.cursor/
+.windsurf/
+.claude/
+
+# ===== Misc =====
+.history/
+*.local
+.turbo
+.eslintcache

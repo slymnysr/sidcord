@@ -1,0 +1,10 @@
+{
+  "name": "@sidcord/proto",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Paylaşımlı protobuf tanımları (gRPC servisler arası iletişim)",
+  "scripts": {
+    "build": "echo 'protoc komutları Faz 1 ile eklenecek'",
+    "lint": "echo 'lint pending'"
+  }
+}

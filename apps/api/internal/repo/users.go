@@ -1,0 +1,75 @@
+package repo
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type User struct {
+	ID           int64     `json:"id,string"`
+	Username     string    `json:"username"`
+	Email        string    `json:"email"`
+	DisplayName  string    `json:"display_name"`
+	PasswordHash string    `json:"-"`
+	AvatarColor  string    `json:"avatar_color"`
+	AvatarURL    *string   `json:"avatar_url,omitempty"`
+	Bio          *string   `json:"bio,omitempty"`
+	Status       string    `json:"status"`
+	Bot          bool      `json:"bot"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+var ErrNotFound = errors.New("repo: not found")
+var ErrConflict = errors.New("repo: conflict")
+
+type Users struct{ pool *pgxpool.Pool }
+
+func NewUsers(p *pgxpool.Pool) *Users { return &Users{pool: p} }
+
+func (r *Users) Create(ctx context.Context, u *User) error {
+	_, err := r.pool.Exec(ctx, `
+        INSERT INTO users (id, username, email, display_name, password_hash, avatar_color)
+        VALUES ($1, $2, $3, $4, $5, $6)
+    `, u.ID, u.Username, u.Email, u.DisplayName, u.PasswordHash, u.AvatarColor)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return ErrConflict
+		}
+		return err
+	}
+	return nil
+}
+
+func (r *Users) ByEmail(ctx context.Context, email string) (*User, error) {
+	u := &User{}
+	err := r.pool.QueryRow(ctx, `
+        SELECT id, username, email, display_name, password_hash, avatar_color, avatar_url, bio, status, bot, created_at
+        FROM users WHERE email = $1
+    `, email).Scan(
+		&u.ID, &u.Username, &u.Email, &u.DisplayName, &u.PasswordHash,
+		&u.AvatarColor, &u.AvatarURL, &u.Bio, &u.Status, &u.Bot, &u.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return u, err
+}
+
+func (r *Users) ByID(ctx context.Context, id int64) (*User, error) {
+	u := &User{}
+	err := r.pool.QueryRow(ctx, `
+        SELECT id, username, email, display_name, password_hash, avatar_color, avatar_url, bio, status, bot, created_at
+        FROM users WHERE id = $1
+    `, id).Scan(
+		&u.ID, &u.Username, &u.Email, &u.DisplayName, &u.PasswordHash,
+		&u.AvatarColor, &u.AvatarURL, &u.Bio, &u.Status, &u.Bot, &u.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return u, err
+}

@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package sidcord.message.v1;
+
+option go_package = "github.com/sidcord/proto/gen/go/message/v1;messagev1";
+
+message Message {
+  string id = 1;             // Snowflake
+  string channel_id = 2;
+  string author_id = 3;
+  string content = 4;
+  int64 created_at = 5;
+  int64 edited_at = 6;
+  repeated Attachment attachments = 7;
+  repeated string mention_user_ids = 8;
+}
+
+message Attachment {
+  string id = 1;
+  string url = 2;
+  string filename = 3;
+  int64 size = 4;
+  string content_type = 5;
+}

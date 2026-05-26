@@ -1,0 +1,36 @@
+@import url('https://rsms.me/inter/inter.css');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  -webkit-font-smoothing: antialiased;
+  background: #0e1117;
+  color: #e6edf3;
+}
+
+/* İnce, modern scrollbar */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: #2d333b;
+  border-radius: 999px;
+  border: 2px solid #0e1117;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #3a414a;
+}

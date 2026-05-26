@@ -1,0 +1,118 @@
+import { useState, useRef, useEffect } from 'react';
+import clsx from 'clsx';
+import { Plus, Compass, Home } from 'lucide-react';
+import { useAppDispatch, useAppSelector, selectGuild, openModal, setMode } from '../store';
+
+export function ServerRail() {
+  const guilds = useAppSelector((s) => s.guilds.list);
+  const selectedId = useAppSelector((s) => s.guilds.selectedId);
+  const mode = useAppSelector((s) => s.ui.mode);
+  const dispatch = useAppDispatch();
+
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    if (menuOpen) document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [menuOpen]);
+
+  return (
+    <aside className="w-[76px] bg-bg flex flex-col items-center py-4 gap-3 border-r border-line">
+      <button
+        title="Arkadaşlar / Direkt Mesajlar"
+        onClick={() => dispatch(setMode('dm'))}
+        className={
+          'w-12 h-12 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 hover:from-brand-400 hover:to-brand-600 flex items-center justify-center text-white transition-all ' +
+          (mode === 'dm' ? 'ring-2 ring-brand-500 ring-offset-2 ring-offset-bg scale-105' : '')
+        }
+      >
+        <Home size={22} strokeWidth={2.5} />
+      </button>
+      <div className="w-8 h-px bg-line" />
+
+      <div className="flex flex-col gap-2.5 flex-1 overflow-y-auto w-full items-center">
+        {guilds.length === 0 && (
+          <p className="text-[10px] text-ink-tertiary text-center px-2 pt-3">
+            Henüz sunucun yok
+          </p>
+        )}
+        {guilds.map((g) => {
+          const active = g.id === selectedId && mode === 'guild';
+          return (
+            <button
+              key={g.id}
+              onClick={() => {
+                dispatch(setMode('guild'));
+                dispatch(selectGuild(g.id));
+              }}
+              title={g.name}
+              className={clsx(
+                'relative w-12 h-12 rounded-xl flex items-center justify-center font-bold text-white text-[15px] tracking-tight transition-all duration-200',
+                active
+                  ? 'ring-2 ring-brand-500 ring-offset-2 ring-offset-bg shadow-glow scale-105'
+                  : 'opacity-85 hover:opacity-100 hover:scale-105',
+              )}
+              style={{ backgroundColor: g.icon_color }}
+            >
+              {g.icon_text}
+              {active && (
+                <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-brand-500" />
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex flex-col gap-2 items-center relative" ref={menuRef}>
+        {menuOpen && (
+          <div className="absolute bottom-0 left-full ml-3 w-56 bg-surface-1 border border-line rounded-xl shadow-2xl p-1 z-30">
+            <button
+              onClick={() => {
+                setMenuOpen(false);
+                dispatch(openModal('create_guild'));
+              }}
+              className="w-full text-left px-3 py-2 rounded-lg hover:bg-surface-2 text-ink-primary flex items-center gap-2"
+            >
+              <Plus size={16} className="text-brand-500" />
+              <span className="text-sm font-medium">Sunucu Oluştur</span>
+            </button>
+            <button
+              onClick={() => {
+                setMenuOpen(false);
+                dispatch(openModal('join_guild'));
+              }}
+              className="w-full text-left px-3 py-2 rounded-lg hover:bg-surface-2 text-ink-primary flex items-center gap-2"
+            >
+              <Compass size={16} className="text-brand-500" />
+              <span className="text-sm font-medium">Davet ile Katıl</span>
+            </button>
+          </div>
+        )}
+
+        <button
+          onClick={() => setMenuOpen((v) => !v)}
+          className={clsx(
+            'w-12 h-12 rounded-xl bg-surface-1 hover:bg-brand-500/15 hover:text-brand-500 text-ink-secondary transition-colors flex items-center justify-center border border-line',
+            menuOpen && 'bg-brand-500/15 text-brand-500',
+          )}
+          title="Sunucu Ekle"
+        >
+          <Plus size={20} strokeWidth={2.5} />
+        </button>
+        <button
+          onClick={() => dispatch(openModal('join_guild'))}
+          className="w-12 h-12 rounded-xl bg-surface-1 hover:bg-brand-500/15 hover:text-brand-500 text-ink-secondary transition-colors flex items-center justify-center border border-line"
+          title="Davet ile Katıl"
+        >
+          <Compass size={20} />
+        </button>
+      </div>
+    </aside>
+  );
+}

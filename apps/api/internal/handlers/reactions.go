@@ -1,0 +1,151 @@
+package handlers
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/url"
+	"strconv"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/sidcord/api/internal/middleware"
+	"github.com/sidcord/api/internal/perms"
+	"github.com/sidcord/api/internal/repo"
+)
+
+func (h *Handler) AddReaction(w http.ResponseWriter, r *http.Request) {
+	messageID, err := parseID(r, "messageID")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "message id parse")
+		return
+	}
+	emoji, err := url.PathUnescape(chi.URLParam(r, "emoji"))
+	if err != nil || emoji == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "emoji geçersiz")
+		return
+	}
+	uid := middleware.UserIDFrom(r.Context())
+
+	// Mesaj + kanal erişimi
+	ok, ch, _ := h.canReadMessage(r, messageID, uid)
+	if !ok || ch == nil {
+		writeError(w, http.StatusForbidden, "forbidden", "bu mesaja tepki veremezsin")
+		return
+	}
+	if err := h.Reactions.Add(r.Context(), messageID, uid, emoji); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "tepki eklenemedi")
+		return
+	}
+	h.publishReaction(r.Context(), ch, messageID, uid, emoji, "REACTION_ADD")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) RemoveReaction(w http.ResponseWriter, r *http.Request) {
+	messageID, err := parseID(r, "messageID")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "message id parse")
+		return
+	}
+	emoji, err := url.PathUnescape(chi.URLParam(r, "emoji"))
+	if err != nil || emoji == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "emoji geçersiz")
+		return
+	}
+	uid := middleware.UserIDFrom(r.Context())
+	ok, ch, _ := h.canReadMessage(r, messageID, uid)
+	if !ok || ch == nil {
+		writeError(w, http.StatusForbidden, "forbidden", "yetersiz")
+		return
+	}
+	if err := h.Reactions.Remove(r.Context(), messageID, uid, emoji); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "tepki kaldırılamadı")
+		return
+	}
+	h.publishReaction(r.Context(), ch, messageID, uid, emoji, "REACTION_REMOVE")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) ListReactions(w http.ResponseWriter, r *http.Request) {
+	messageID, err := parseID(r, "messageID")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "message id parse")
+		return
+	}
+	uid := middleware.UserIDFrom(r.Context())
+	ok, _, _ := h.canReadMessage(r, messageID, uid)
+	if !ok {
+		writeError(w, http.StatusForbidden, "forbidden", "yetersiz")
+		return
+	}
+	list, err := h.Reactions.ForMessage(r.Context(), messageID, uid)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "tepkiler alınamadı")
+		return
+	}
+	if list == nil {
+		list = []repo.ReactionSummary{}
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// canReadMessage — mesajın bulunduğu kanalı okuma yetkisi
+func (h *Handler) canReadMessage(r *http.Request, messageID, userID int64) (bool, *repo.Channel, *repo.Message) {
+	// Mesajı önce bul
+	var channelID int64
+	if err := h.Pool.QueryRow(r.Context(),
+		`SELECT channel_id FROM messages WHERE id = $1`, messageID).Scan(&channelID); err != nil {
+		return false, nil, nil
+	}
+	ch, err := h.Channels.ByID(r.Context(), channelID)
+	if err != nil {
+		return false, nil, nil
+	}
+	if ch.GuildID != nil {
+		if ok, _ := h.Guilds.IsMember(r.Context(), *ch.GuildID, userID); !ok {
+			return false, nil, nil
+		}
+		chanPerms, err := h.computeChannelPerms(r.Context(), *ch.GuildID, ch.ID, userID)
+		if err != nil || !perms.Has(chanPerms, perms.ViewChannel) {
+			return false, nil, nil
+		}
+	} else {
+		if ok, _ := h.DMs.IsParticipant(r.Context(), ch.ID, userID); !ok {
+			return false, nil, nil
+		}
+	}
+	return true, ch, nil
+}
+
+func (h *Handler) publishReaction(ctx context.Context, ch *repo.Channel, messageID, userID int64, emoji, eventType string) {
+	if h.Redis == nil {
+		return
+	}
+	base := map[string]any{
+		"type":       eventType,
+		"channel_id": strconv.FormatInt(ch.ID, 10),
+		"message_id": strconv.FormatInt(messageID, 10),
+		"user_id":    strconv.FormatInt(userID, 10),
+		"emoji":      emoji,
+		"ts":         time.Now().UnixMilli(),
+	}
+	if ch.GuildID != nil {
+		base["guild_id"] = strconv.FormatInt(*ch.GuildID, 10)
+		payload, _ := json.Marshal(base)
+		h.Redis.Publish(ctx, "sidcord:guild:"+strconv.FormatInt(*ch.GuildID, 10), payload)
+	} else {
+		payload, _ := json.Marshal(base)
+		rows, err := h.Pool.Query(ctx, `SELECT user_id FROM dm_participants WHERE channel_id = $1`, ch.ID)
+		if err != nil {
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var uid int64
+			if err := rows.Scan(&uid); err == nil {
+				h.Redis.Publish(ctx, "sidcord:user:"+strconv.FormatInt(uid, 10), payload)
+			}
+		}
+	}
+}
+

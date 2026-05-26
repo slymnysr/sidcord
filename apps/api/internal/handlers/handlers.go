@@ -1,0 +1,109 @@
+package handlers
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
+	"github.com/sidcord/api/internal/auth"
+	"github.com/sidcord/api/internal/config"
+	"github.com/sidcord/api/internal/repo"
+	"github.com/sidcord/api/internal/snowflake"
+	"github.com/sidcord/api/internal/storage"
+	"go.uber.org/zap"
+)
+
+type Handler struct {
+	logger *zap.Logger
+	cfg    *config.Config
+
+	IDs     *snowflake.Generator
+	Iss     *auth.Issuer
+	Pool    *pgxpool.Pool
+	Redis   *redis.Client
+	Storage *storage.Storage
+
+	Users         *repo.Users
+	Guilds        *repo.Guilds
+	Channels      *repo.Channels
+	Messages      *repo.Messages
+	RefreshTokens *repo.RefreshTokens
+	Invites       *repo.Invites
+	Members       *repo.Members
+	Roles         *repo.Roles
+	ChannelPerms  *repo.ChannelPerms
+	Moderation    *repo.Moderation
+	DMs           *repo.DMs
+	Reactions     *repo.Reactions
+	Attachments   *repo.Attachments
+	Mentions      *repo.Mentions
+	Notifications *repo.Notifications
+	Friends       *repo.Friends
+}
+
+func New(logger *zap.Logger, cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Client, ids *snowflake.Generator, iss *auth.Issuer, store *storage.Storage) *Handler {
+	return &Handler{
+		logger:        logger,
+		cfg:           cfg,
+		IDs:           ids,
+		Iss:           iss,
+		Pool:          pool,
+		Redis:         rdb,
+		Storage:       store,
+		Users:         repo.NewUsers(pool),
+		Guilds:        repo.NewGuilds(pool),
+		Channels:      repo.NewChannels(pool),
+		Messages:      repo.NewMessages(pool),
+		RefreshTokens: repo.NewRefreshTokens(pool),
+		Invites:       repo.NewInvites(pool),
+		Members:       repo.NewMembers(pool),
+		Roles:         repo.NewRoles(pool),
+		ChannelPerms:  repo.NewChannelPerms(pool),
+		Moderation:    repo.NewModeration(pool),
+		DMs:           repo.NewDMs(pool),
+		Reactions:     repo.NewReactions(pool),
+		Attachments:   repo.NewAttachments(pool),
+		Mentions:      repo.NewMentions(pool),
+		Notifications: repo.NewNotifications(pool),
+		Friends:       repo.NewFriends(pool),
+	}
+}
+
+func (h *Handler) Health(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "ok",
+		"service": "sidcord-api",
+	})
+}
+
+func (h *Handler) Version(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{
+		"version":     "0.0.1",
+		"environment": h.cfg.Environment,
+	})
+}
+
+func writeJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+func writeError(w http.ResponseWriter, status int, code, detail string) {
+	writeJSON(w, status, map[string]string{
+		"error":  code,
+		"detail": detail,
+	})
+}
+
+func readJSON(r *http.Request, v any) error {
+	defer r.Body.Close()
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return errors.New("invalid JSON: " + err.Error())
+	}
+	return nil
+}

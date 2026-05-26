@@ -1,0 +1,352 @@
+import { useEffect, useRef, useState } from 'react';
+import { Volume2, ScreenShare, Video, PhoneCall, Mic, MicOff, PhoneOff } from 'lucide-react';
+import { voice } from './voice';
+import { ServerRail } from './components/ServerRail';
+import { ChannelList } from './components/ChannelList';
+import { ChannelHeader } from './components/ChannelHeader';
+import { MessageList } from './components/MessageList';
+import { MessageInput } from './components/MessageInput';
+import { MemberList } from './components/MemberList';
+import { AuthPage } from './pages/AuthPage';
+import { Modal } from './components/Modal';
+import { DMSidebar } from './components/DMSidebar';
+import {
+  useAppDispatch,
+  useAppSelector,
+  fetchMe,
+  fetchGuilds,
+  fetchChannels,
+  fetchMessages,
+  fetchMembers,
+  fetchReactions,
+  pushMessage,
+  updateMessage,
+  removeMessage,
+  upsertUser,
+  setGuildPresence,
+  setTyping,
+  pruneTyping,
+} from './store';
+import { tokenStore } from './api';
+import { connectGateway, joinGuild, joinUser, disconnectGateway, onGuildEvent } from './gateway';
+
+export default function App() {
+  const dispatch = useAppDispatch();
+  const user = useAppSelector((s) => s.auth.user);
+  const guildId = useAppSelector((s) => s.guilds.selectedId);
+  const channelId = useAppSelector((s) => s.channels.selectedId);
+  const channels = useAppSelector((s) => (guildId ? s.channels.byGuild[guildId] : undefined));
+  const channel = channels?.find((c) => c.id === channelId);
+  const mode = useAppSelector((s) => s.ui.mode);
+  const showMembers = useAppSelector((s) => s.ui.showMemberList);
+
+  // İlk yüklemede /me dene (token var ise)
+  useEffect(() => {
+    if (tokenStore.access() && !user) {
+      dispatch(fetchMe());
+    }
+  }, [dispatch, user]);
+
+  // Login sonrası guild'leri çek + user kanalına abone ol
+  useEffect(() => {
+    if (user) {
+      dispatch(fetchGuilds());
+      connectGateway();
+      joinUser(user.id, {
+        onDMMessage: (event: any) => {
+          if (event.author) dispatch(upsertUser(event.author));
+          if (event.message) dispatch(pushMessage(event.message));
+        },
+      });
+    }
+    return () => {
+      if (!user) disconnectGateway();
+    };
+  }, [user, dispatch]);
+
+  // Guild seçiminde kanalları + üyeleri çek + gateway topic'e abone ol
+  useEffect(() => {
+    if (!guildId) return;
+    dispatch(fetchChannels(guildId));
+    dispatch(fetchMembers(guildId));
+    joinGuild(guildId, {
+      onMessage: (event: any) => {
+        if (event.author) dispatch(upsertUser(event.author));
+        if (event.message) dispatch(pushMessage(event.message));
+      },
+      onPresence: (ids) => {
+        dispatch(setGuildPresence({ guildId, userIds: Array.from(ids) }));
+      },
+    });
+    const offEdit = onGuildEvent(guildId, 'MESSAGE_UPDATE', (ev: any) => {
+      if (ev.message) dispatch(updateMessage(ev.message));
+    });
+    const offDel = onGuildEvent(guildId, 'MESSAGE_DELETE', (ev: any) => {
+      if (ev.message) {
+        dispatch(removeMessage({ channel_id: ev.message.channel_id, id: ev.message.id }));
+      }
+    });
+    const offReactAdd = onGuildEvent(guildId, 'REACTION_ADD', (ev: any) => {
+      if (ev.message_id) dispatch(fetchReactions(ev.message_id));
+    });
+    const offReactRem = onGuildEvent(guildId, 'REACTION_REMOVE', (ev: any) => {
+      if (ev.message_id) dispatch(fetchReactions(ev.message_id));
+    });
+    const offTyping = onGuildEvent(guildId, 'TYPING_START', (ev: any) => {
+      if (ev.user_id && ev.channel_id) {
+        dispatch(setTyping({ channelId: ev.channel_id, userId: ev.user_id }));
+      }
+    });
+    const pruneInterval = setInterval(() => dispatch(pruneTyping()), 1000);
+    return () => {
+      offEdit();
+      offDel();
+      offReactAdd();
+      offReactRem();
+      offTyping();
+      clearInterval(pruneInterval);
+    };
+  }, [guildId, dispatch]);
+
+  // Kanal seçiminde mesajları çek
+  useEffect(() => {
+    if (!channelId) return;
+    dispatch(fetchMessages(channelId));
+  }, [channelId, dispatch]);
+
+  if (!user) return <AuthPage />;
+
+  return (
+    <div className="h-screen flex bg-bg text-ink-primary overflow-hidden">
+      <ServerRail />
+      {mode === 'dm' ? <DMSidebar /> : <ChannelList />}
+      <main className="flex-1 flex flex-col min-w-0">
+        <ChannelHeader />
+        <div className="flex-1 flex min-h-0">
+          <div className="flex-1 flex flex-col min-w-0">
+            {channel?.type === 'voice' ? <VoiceStage /> : <MessageList />}
+            <MessageInput />
+          </div>
+          {showMembers && channel?.type !== 'voice' && mode === 'guild' && <MemberList />}
+        </div>
+      </main>
+      <Modal />
+    </div>
+  );
+}
+
+function VoiceStage() {
+  const channelId = useAppSelector((s) => s.channels.selectedId);
+  const me = useAppSelector((s) => s.auth.user);
+  const [connected, setConnected] = useState(voice.channelId === channelId);
+  const [micOn, setMicOn] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [cameraOn, setCameraOn] = useState(false);
+  const [screenOn, setScreenOn] = useState(false);
+  const [localCamera, setLocalCamera] = useState<MediaStream | null>(null);
+  const [localScreen, setLocalScreen] = useState<MediaStream | null>(null);
+  const [, force] = useState(0);
+
+  useEffect(() => {
+    const onChange = () => force((n) => n + 1);
+    const onCamera = ({ stream }: any) => setLocalCamera(stream);
+    const onScreen = ({ stream }: any) => setLocalScreen(stream);
+    voice.on('remotes:changed', onChange);
+    voice.on('local:camera', onCamera);
+    voice.on('local:screen', onScreen);
+    return () => {
+      voice.off('remotes:changed', onChange);
+      voice.off('local:camera', onCamera);
+      voice.off('local:screen', onScreen);
+    };
+  }, []);
+
+  async function join() {
+    if (!channelId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await voice.connect(channelId);
+      setConnected(true);
+    } catch (e: any) {
+      setError(e?.message || 'Sese katılamadı');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function leave() {
+    setBusy(true);
+    try {
+      await voice.disconnect();
+      setConnected(false);
+      setCameraOn(false);
+      setScreenOn(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleCamera() {
+    try {
+      if (cameraOn) {
+        await voice.unpublishCamera();
+        setCameraOn(false);
+      } else {
+        await voice.publishCamera();
+        setCameraOn(true);
+      }
+    } catch (e: any) {
+      setError(e?.message || 'Kamera açılamadı');
+    }
+  }
+
+  async function toggleScreen() {
+    try {
+      if (screenOn) {
+        await voice.unpublishScreen();
+        setScreenOn(false);
+      } else {
+        await voice.publishScreen();
+        setScreenOn(true);
+      }
+    } catch (e: any) {
+      if (e?.name !== 'NotAllowedError') {
+        setError(e?.message || 'Ekran paylaşılamadı');
+      }
+    }
+  }
+
+  function toggleMic() {
+    voice.setMicrophoneEnabled(!micOn);
+    setMicOn(!micOn);
+  }
+
+  if (!connected) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center bg-gradient-to-b from-bg via-bg to-brand-900/20">
+        <div className="w-24 h-24 rounded-3xl bg-brand-500/10 text-brand-500 flex items-center justify-center mb-6">
+          <Volume2 size={48} strokeWidth={1.5} />
+        </div>
+        <h2 className="text-2xl font-bold text-ink-primary mb-2">Sesli kanala katıl</h2>
+        <p className="text-ink-secondary max-w-md text-center px-6">
+          WebRTC + mediasoup SFU. Kamera ve ekran paylaşımı destekli.
+        </p>
+        {error && <p className="text-accent-500 mt-3 text-sm">{error}</p>}
+        <button
+          onClick={join}
+          disabled={busy}
+          className="mt-6 px-6 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-400 disabled:bg-surface-3 text-white font-semibold flex items-center gap-2 transition-colors"
+        >
+          <PhoneCall size={18} />
+          {busy ? 'Bağlanıyor...' : 'Sese Katıl'}
+        </button>
+      </div>
+    );
+  }
+
+  const videoTiles: { key: string; label: string; stream: MediaStream; me?: boolean }[] = [];
+  if (localCamera) videoTiles.push({ key: 'self-cam', label: `${me?.display_name ?? 'Sen'} · kamera`, stream: localCamera, me: true });
+  if (localScreen) videoTiles.push({ key: 'self-scr', label: `${me?.display_name ?? 'Sen'} · ekran`, stream: localScreen, me: true });
+  for (const r of voice.remoteStreams()) {
+    if (r.kind === 'video') {
+      videoTiles.push({
+        key: r.producerId,
+        label: `${r.userId} · ${r.source === 'screen' ? 'ekran' : 'kamera'}`,
+        stream: r.stream,
+      });
+    }
+  }
+  const audioPeers = new Set<string>();
+  for (const r of voice.remoteStreams()) if (r.kind === 'audio') audioPeers.add(r.userId);
+
+  return (
+    <div className="flex-1 flex flex-col bg-gradient-to-b from-bg via-bg to-brand-900/10 overflow-hidden">
+      <div className="flex-1 p-6 overflow-y-auto">
+        {videoTiles.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-center">
+            <div className="w-20 h-20 rounded-3xl bg-brand-500/10 text-brand-500 flex items-center justify-center mb-4">
+              <Mic size={36} />
+            </div>
+            <p className="text-ink-secondary">Sadece sesli sohbet. Video açmak için aşağıdaki butonları kullan.</p>
+            {audioPeers.size > 0 && (
+              <p className="text-ink-tertiary text-sm mt-2">{audioPeers.size} kullanıcı bağlı</p>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 auto-rows-fr">
+            {videoTiles.map((t) => (
+              <VideoTile key={t.key} stream={t.stream} label={t.label} isLocal={t.me} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-line bg-surface-1 px-6 py-4 flex items-center justify-center gap-3">
+        <button
+          onClick={toggleMic}
+          className={
+            'w-12 h-12 rounded-full flex items-center justify-center transition-colors ' +
+            (micOn ? 'bg-surface-2 hover:bg-surface-3 text-ink-primary' : 'bg-accent-500 hover:bg-accent-600 text-white')
+          }
+          title={micOn ? 'Mikrofonu kapat' : 'Mikrofonu aç'}
+        >
+          {micOn ? <Mic size={18} /> : <MicOff size={18} />}
+        </button>
+        <button
+          onClick={toggleCamera}
+          className={
+            'w-12 h-12 rounded-full flex items-center justify-center transition-colors ' +
+            (cameraOn ? 'bg-brand-500 hover:bg-brand-400 text-white' : 'bg-surface-2 hover:bg-surface-3 text-ink-primary')
+          }
+          title={cameraOn ? 'Kamerayı kapat' : 'Kamerayı aç'}
+        >
+          <Video size={18} />
+        </button>
+        <button
+          onClick={toggleScreen}
+          className={
+            'w-12 h-12 rounded-full flex items-center justify-center transition-colors ' +
+            (screenOn ? 'bg-brand-500 hover:bg-brand-400 text-white' : 'bg-surface-2 hover:bg-surface-3 text-ink-primary')
+          }
+          title={screenOn ? 'Ekran paylaşımını kapat' : 'Ekran paylaş'}
+        >
+          <ScreenShare size={18} />
+        </button>
+        <button
+          onClick={leave}
+          disabled={busy}
+          className="w-12 h-12 rounded-full bg-accent-500 hover:bg-accent-600 text-white flex items-center justify-center transition-colors"
+          title="Sesten ayrıl"
+        >
+          <PhoneOff size={18} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function VideoTile({ stream, label, isLocal }: { stream: MediaStream; label: string; isLocal?: boolean }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    if (ref.current && ref.current.srcObject !== stream) {
+      ref.current.srcObject = stream;
+    }
+  }, [stream]);
+  return (
+    <div className="relative bg-black rounded-2xl overflow-hidden border border-line aspect-video">
+      <video
+        ref={ref}
+        autoPlay
+        playsInline
+        muted={isLocal}
+        className="w-full h-full object-cover"
+      />
+      <div className="absolute bottom-2 left-2 bg-black/70 px-2 py-1 rounded text-xs text-white font-medium">
+        {label}
+        {isLocal && <span className="ml-1 text-brand-400">(sen)</span>}
+      </div>
+    </div>
+  );
+}
