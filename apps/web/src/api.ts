@@ -296,10 +296,15 @@ export const api = {
         body: JSON.stringify({ name, icon_text: iconText, icon_color: iconColor }),
       }),
     channels: (guildId: string) => request<APIChannel[]>(`/guilds/${guildId}/channels`),
-    createChannel: (guildId: string, name: string, type: 'text' | 'voice' | 'announcement' | 'forum' | 'stage' | 'category' = 'text') =>
+    createChannel: (
+      guildId: string,
+      name: string,
+      type: 'text' | 'voice' | 'announcement' | 'forum' | 'stage' | 'category' = 'text',
+      parentId?: string | null,
+    ) =>
       request<APIChannel>('/channels', {
         method: 'POST',
-        body: JSON.stringify({ guild_id: guildId, name, type }),
+        body: JSON.stringify({ guild_id: guildId, name, type, parent_id: parentId ?? undefined }),
       }),
     members: (guildId: string) => request<APIMember[]>(`/guilds/${guildId}/members`),
     createInvite: (guildId: string, opts: { max_uses?: number; expires_in_sec?: number } = {}) =>
@@ -417,7 +422,14 @@ export const api = {
       }),
     update: (
       channelId: string,
-      patch: { name?: string; topic?: string; nsfw?: boolean; rate_limit_sec?: number },
+      patch: {
+        name?: string;
+        topic?: string;
+        nsfw?: boolean;
+        rate_limit_sec?: number;
+        parent_id?: string | null;
+        position?: number;
+      },
     ) =>
       request<APIChannel>(`/channels/${channelId}`, {
         method: 'PATCH',

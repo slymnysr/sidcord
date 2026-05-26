@@ -59,13 +59,57 @@ export function ChannelList() {
     return () => clearInterval(t);
   }, [all, dispatch]);
 
-  const groups: Record<string, APIChannel[]> = { Kanallar: all };
+  // Kategorilere göre grupla — kategori type='category', diğer kanallar parent_id'yi referans alır
+  const categories = all
+    .filter((c) => c.type === 'category')
+    .sort((a, b) => a.position - b.position);
+  const byParent: Record<string, APIChannel[]> = {};
+  const uncategorized: APIChannel[] = [];
+  for (const ch of all) {
+    if (ch.type === 'category') continue;
+    if (ch.parent_id) {
+      (byParent[ch.parent_id] ??= []).push(ch);
+    } else {
+      uncategorized.push(ch);
+    }
+  }
+  for (const k of Object.keys(byParent)) {
+    byParent[k].sort((a, b) => a.position - b.position);
+  }
+  uncategorized.sort((a, b) => a.position - b.position);
+
+  function renderChannel(ch: APIChannel) {
+    const active = ch.id === selectedId;
+    const Icon = ChannelIcon[ch.type] ?? Hash;
+    const connected = ch.type === 'voice' ? voiceByChannel[ch.id] ?? [] : [];
+    return (
+      <li key={ch.id} className="relative">
+        {active && (
+          <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 bg-brand-500 rounded-r-full" />
+        )}
+        <ChannelButton channel={ch} active={active} Icon={Icon} connectedCount={connected.length} />
+        {ch.type === 'voice' && connected.length > 0 && (
+          <ul className="ml-6 mt-0.5 space-y-0.5">
+            {connected.map((uid: string) => {
+              const u = usersById[uid];
+              return (
+                <li key={uid} className="flex items-center gap-2 px-2 py-0.5 text-xs text-ink-secondary">
+                  <span className="w-2 h-2 rounded-full bg-status-online" />
+                  <span className="truncate">{u?.display_name ?? uid}</span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </li>
+    );
+  }
 
   return (
     <aside className="w-64 bg-surface-1 flex flex-col border-r border-line">
       <GuildHeader />
 
-      <div className="flex-1 overflow-y-auto py-3 px-2.5 space-y-5">
+      <div className="flex-1 overflow-y-auto py-3 px-2.5 space-y-3">
         {!guildId && (
           <p className="text-sm text-ink-tertiary px-2 py-6 text-center">
             Sol kenardan bir sunucu seç veya oluştur.
@@ -83,54 +127,81 @@ export function ChannelList() {
         {guildId && all.length === 0 && (
           <p className="text-sm text-ink-tertiary px-2 py-6 text-center">Kanal yok.</p>
         )}
-        {Object.entries(groups).map(([cat, list]) =>
-          list.length === 0 ? null : (
-            <section key={cat}>
-              <div className="px-2 mb-1.5 text-[11px] font-bold text-ink-tertiary uppercase tracking-[0.08em] flex items-center justify-between">
-                <span>{cat}</span>
-                <ChevronDown size={12} />
-              </div>
-              <ul className="space-y-0.5">
-                {list.map((ch) => {
-                  const active = ch.id === selectedId;
-                  const Icon = ChannelIcon[ch.type] ?? Hash;
-                  const connected = ch.type === 'voice' ? voiceByChannel[ch.id] ?? [] : [];
-                  return (
-                    <li key={ch.id} className="relative">
-                      {active && (
-                        <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 bg-brand-500 rounded-r-full" />
-                      )}
-                      <ChannelButton
-                        channel={ch}
-                        active={active}
-                        Icon={Icon}
-                        connectedCount={connected.length}
-                      />
-                      {ch.type === 'voice' && connected.length > 0 && (
-                        <ul className="ml-6 mt-0.5 space-y-0.5">
-                          {connected.map((uid: string) => {
-                            const u = usersById[uid];
-                            return (
-                              <li key={uid} className="flex items-center gap-2 px-2 py-0.5 text-xs text-ink-secondary">
-                                <span className="w-2 h-2 rounded-full bg-status-online" />
-                                <span className="truncate">{u?.display_name ?? uid}</span>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          ),
-        )}
+
+        {/* Kategorisiz kanallar üstte */}
+        {uncategorized.length > 0 && <ul className="space-y-0.5">{uncategorized.map(renderChannel)}</ul>}
+
+        {/* Kategoriler ve altlarındaki kanallar */}
+        {categories.map((cat) => (
+          <CategorySection
+            key={cat.id}
+            category={cat}
+            children={byParent[cat.id] ?? []}
+            renderChannel={renderChannel}
+          />
+        ))}
       </div>
 
       <VoiceStatusBar />
       <UserPanel />
     </aside>
+  );
+}
+
+function CategorySection({
+  category,
+  children,
+  renderChannel,
+}: {
+  category: APIChannel;
+  children: APIChannel[];
+  renderChannel: (ch: APIChannel) => React.ReactNode;
+}) {
+  const dispatch = useAppDispatch();
+  const [collapsed, setCollapsed] = useState(false);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+
+  function onContextMenu(e: React.MouseEvent) {
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY });
+  }
+
+  return (
+    <section>
+      <div
+        onContextMenu={onContextMenu}
+        className="px-2 mb-1 text-[11px] font-bold text-ink-tertiary uppercase tracking-[0.08em] flex items-center justify-between hover:text-ink-secondary group"
+      >
+        <button
+          type="button"
+          onClick={() => setCollapsed((v) => !v)}
+          className="flex items-center gap-1 flex-1 min-w-0 text-left"
+        >
+          <ChevronDown
+            size={10}
+            className={'transition-transform ' + (collapsed ? '-rotate-90' : '')}
+          />
+          <span className="truncate">{category.name}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => dispatch(openModal('create_channel'))}
+          title="Bu kategoriye kanal ekle"
+          className="opacity-0 group-hover:opacity-100 text-base leading-none hover:text-ink-primary"
+        >
+          +
+        </button>
+      </div>
+      {!collapsed && children.length > 0 && <ul className="space-y-0.5">{children.map(renderChannel)}</ul>}
+      {menu && (
+        <ChannelContextMenu
+          channel={category}
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+        />
+      )}
+    </section>
   );
 }
 

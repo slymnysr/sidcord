@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/sidcord/api/internal/middleware"
@@ -162,6 +163,18 @@ func (h *Handler) UpdateChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.UserLimit != nil {
 		addSet("user_limit", *req.UserLimit)
+	}
+	if req.ParentID != nil {
+		if *req.ParentID == "" {
+			addSet("parent_id", nil)
+		} else {
+			pid, err := strconv.ParseInt(*req.ParentID, 10, 64)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "bad_request", "parent_id parse")
+				return
+			}
+			addSet("parent_id", pid)
+		}
 	}
 	if len(sets) == 0 {
 		writeError(w, http.StatusBadRequest, "nothing_to_update", "değişiklik yok")

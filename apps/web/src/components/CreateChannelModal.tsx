@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Hash, Volume2, Megaphone, MessagesSquare, Mic, Lock, ChevronLeft } from 'lucide-react';
+import { Hash, Volume2, Megaphone, MessagesSquare, Mic, Lock, ChevronLeft, FolderTree } from 'lucide-react';
 import { api, type APIRole } from '../api';
 import { useAppDispatch, useAppSelector, closeModal, fetchChannels, selectChannel } from '../store';
 
-type ChannelType = 'text' | 'voice' | 'announcement' | 'forum' | 'stage';
+type ChannelType = 'text' | 'voice' | 'announcement' | 'forum' | 'stage' | 'category';
 
 // Discord paritesi: izin bitmask. ViewChannel = 1 << 10 = 1024
 const VIEW_CHANNEL = '1024';
@@ -14,6 +14,7 @@ const types: { type: ChannelType; icon: any; label: string; description: string 
   { type: 'announcement', icon: Megaphone, label: 'Duyuru', description: 'Yöneticiler yazar, diğerleri okur' },
   { type: 'stage', icon: Mic, label: 'Sahne', description: 'Konuşmacı/dinleyici düzeni' },
   { type: 'forum', icon: MessagesSquare, label: 'Forum', description: 'Konu bazlı tartışma başlatma' },
+  { type: 'category', icon: FolderTree, label: 'Kategori', description: 'Kanalları gruplamak için' },
 ];
 
 type Step = 'type' | 'details';
@@ -21,9 +22,14 @@ type Step = 'type' | 'details';
 export function CreateChannelModal() {
   const dispatch = useAppDispatch();
   const guildId = useAppSelector((s) => s.guilds.selectedId);
+  const channels = useAppSelector((s) =>
+    guildId ? s.channels.byGuild[guildId] ?? [] : [],
+  );
+  const existingCategories = channels.filter((c) => c.type === 'category');
   const [step, setStep] = useState<Step>('type');
   const [type, setType] = useState<ChannelType>('text');
   const [name, setName] = useState('');
+  const [parentId, setParentId] = useState<string>('');
   const [isPrivate, setIsPrivate] = useState(false);
   const [roles, setRoles] = useState<APIRole[]>([]);
   const [selectedRoles, setSelectedRoles] = useState<Set<string>>(new Set());
@@ -52,12 +58,20 @@ export function CreateChannelModal() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!guildId) return;
-    const v = type === 'voice' || type === 'stage' ? name.trim() : name.trim().toLowerCase().replace(/\s+/g, '-');
+    const isCategory = type === 'category';
+    const v = type === 'voice' || type === 'stage' || isCategory
+      ? name.trim()
+      : name.trim().toLowerCase().replace(/\s+/g, '-');
     if (!v) return;
     setLoading(true);
     setError(null);
     try {
-      const created = await api.guilds.createChannel(guildId, v, type);
+      const created = await api.guilds.createChannel(
+        guildId,
+        v,
+        type,
+        isCategory ? null : parentId || null,
+      );
       // Özel kanal: @everyone'dan ViewChannel kaldır, seçili rollere allow ekle
       if (isPrivate) {
         const everyone = (await api.guilds.roles(guildId)).find((r) => r.is_everyone);
@@ -187,6 +201,24 @@ export function CreateChannelModal() {
         />
       </div>
 
+      {type !== 'category' && existingCategories.length > 0 && (
+        <>
+          <label className="block text-sm font-semibold text-ink-primary mb-1.5">Kategori</label>
+          <select
+            value={parentId}
+            onChange={(e) => setParentId(e.target.value)}
+            className="w-full bg-surface-2 border border-line focus:border-brand-500/50 focus:outline-none rounded-lg px-3 py-2.5 text-ink-primary mb-4"
+          >
+            <option value="">— Kategorisiz —</option>
+            {existingCategories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
+
       <label className="flex items-start gap-3 mb-4 cursor-pointer">
         <input
           type="checkbox"
@@ -197,10 +229,12 @@ export function CreateChannelModal() {
         <div className="flex-1">
           <div className="text-sm font-semibold text-ink-primary flex items-center gap-1.5">
             <Lock size={14} className="text-ink-tertiary" />
-            Özel Kanal
+            Özel {type === 'category' ? 'Kategori' : 'Kanal'}
           </div>
           <div className="text-xs text-ink-tertiary mt-0.5">
-            Bu kanalı yalnızca seçilen roller ve üyeler görebilir.
+            {type === 'category'
+              ? 'Bu kategori ve altındaki kanallar yalnızca seçilen rollere görünür.'
+              : 'Bu kanalı yalnızca seçilen roller ve üyeler görebilir.'}
           </div>
         </div>
       </label>
