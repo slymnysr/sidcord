@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Hash, Volume2, Megaphone, MessagesSquare, Mic, Users, UserPlus, Bell, Search, type LucideIcon } from 'lucide-react';
+import { Hash, Volume2, Megaphone, MessagesSquare, Mic, Users, UserPlus, Bell, Search, AtSign, type LucideIcon } from 'lucide-react';
 import { useAppDispatch, useAppSelector, toggleMemberList, openModal } from '../store';
-import { api } from '../api';
+import { api, type APIPublicUser } from '../api';
 
 const Icon: Record<string, LucideIcon> = {
   text: Hash,
@@ -15,24 +15,57 @@ const Icon: Record<string, LucideIcon> = {
 export function ChannelHeader() {
   const guildId = useAppSelector((s) => s.guilds.selectedId);
   const channelId = useAppSelector((s) => s.channels.selectedId);
+  const mode = useAppSelector((s) => s.ui.mode);
+  const me = useAppSelector((s) => s.auth.user);
   const channel = useAppSelector((s) =>
     guildId && channelId ? s.channels.byGuild[guildId]?.find((c) => c.id === channelId) : null,
   );
   const showMembers = useAppSelector((s) => s.ui.showMemberList);
   const dispatch = useAppDispatch();
-  const Ico = channel ? Icon[channel.type] ?? Hash : Hash;
+  const Ico = mode === 'dm' ? AtSign : channel ? Icon[channel.type] ?? Hash : Hash;
+
+  const [dmPartner, setDmPartner] = useState<APIPublicUser | null>(null);
+  useEffect(() => {
+    if (mode !== 'dm' || !channelId || !me) {
+      setDmPartner(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const dms = await api.dms.list();
+        const dm = dms.find((d) => d.id === channelId);
+        if (!dm) return;
+        const otherId = dm.participants.find((p) => p !== me.id);
+        if (!otherId) return;
+        const u = await api.users.user(otherId);
+        if (!cancelled) setDmPartner(u);
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, channelId, me]);
 
   return (
     <header className="h-14 px-5 flex items-center gap-3 border-b border-line bg-bg">
       <Ico size={20} className="text-ink-tertiary" />
       <div className="flex items-baseline gap-3 min-w-0">
-        <h1 className="text-ink-primary font-semibold truncate">{channel?.name ?? '—'}</h1>
+        <h1 className="text-ink-primary font-semibold truncate">
+          {mode === 'dm'
+            ? dmPartner?.display_name ?? (channelId ? 'Yükleniyor...' : 'Bir konuşma seç')
+            : channel?.name ?? '—'}
+        </h1>
         <span className="text-ink-tertiary text-xs hidden md:inline">
-          {channel?.type === 'voice'
-            ? 'Sesli kanal'
-            : channel?.type === 'announcement'
-              ? 'Duyuru kanalı'
-              : 'Sohbet'}
+          {mode === 'dm'
+            ? dmPartner
+              ? `@${dmPartner.username}`
+              : ''
+            : channel?.type === 'voice'
+              ? 'Sesli kanal'
+              : channel?.type === 'announcement'
+                ? 'Duyuru kanalı'
+                : 'Sohbet'}
         </span>
       </div>
 

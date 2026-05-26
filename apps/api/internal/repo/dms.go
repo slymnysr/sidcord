@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -17,7 +18,7 @@ type DMChannel struct {
 	ID           int64     `json:"id,string"`
 	Type         string    `json:"type"` // 'dm' veya 'group_dm'
 	Name         string    `json:"name"`
-	Participants []int64   `json:"participants"`
+	Participants []string  `json:"participants"` // string'e çevriliyor (int64 JS'te taşıyor)
 	CreatedAt    time.Time `json:"created_at"`
 }
 
@@ -85,8 +86,13 @@ func (r *DMs) ListForUser(ctx context.Context, userID int64) ([]DMChannel, error
 	var list []DMChannel
 	for rows.Next() {
 		var dm DMChannel
-		if err := rows.Scan(&dm.ID, &dm.Type, &dm.Name, &dm.CreatedAt, &dm.Participants); err != nil {
+		var ids []int64
+		if err := rows.Scan(&dm.ID, &dm.Type, &dm.Name, &dm.CreatedAt, &ids); err != nil {
 			return nil, err
+		}
+		dm.Participants = make([]string, len(ids))
+		for i, id := range ids {
+			dm.Participants[i] = strconv.FormatInt(id, 10)
 		}
 		list = append(list, dm)
 	}
