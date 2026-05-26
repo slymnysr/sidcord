@@ -9,6 +9,7 @@ import { AddFriendModal } from './AddFriendModal';
 import { SearchModal } from './SearchModal';
 import { CreateChannelModal } from './CreateChannelModal';
 import { ChannelEditModal } from './ChannelEditModal';
+import { ChannelPermissionsModal } from './ChannelPermissionsModal';
 
 export function Modal() {
   const modal = useAppSelector((s) => s.ui.modal);
@@ -42,9 +43,11 @@ export function Modal() {
           'bg-surface-1 border border-line rounded-2xl shadow-2xl relative ring-1 ring-white/5 ' +
           (modal === 'server_settings'
             ? 'w-full max-w-4xl'
-            : modal === 'friends' || modal === 'search'
-              ? 'w-full max-w-2xl'
-              : 'w-full max-w-md')
+            : modal === 'channel_perms'
+              ? 'w-full max-w-3xl overflow-hidden'
+              : modal === 'friends' || modal === 'search'
+                ? 'w-full max-w-2xl'
+                : 'w-full max-w-md')
         }
       >
         <button
@@ -62,6 +65,7 @@ export function Modal() {
         {modal === 'search' && <SearchModal />}
         {modal === 'create_channel' && <CreateChannelModal />}
         {modal === 'edit_channel' && editingChannel && <ChannelEditModal channel={editingChannel} />}
+        {modal === 'channel_perms' && editingChannel && <ChannelPermissionsModal channel={editingChannel} />}
       </div>
     </div>
   );

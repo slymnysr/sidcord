@@ -11,6 +11,7 @@ import {
   LogOut,
   UserPlus,
   Pencil,
+  Lock,
   Trash2,
   Link as LinkIcon,
   BellOff,
@@ -26,6 +27,7 @@ import {
   fetchVoicePresence,
   fetchChannels,
   openEditChannel,
+  openChannelPerms,
 } from '../store';
 import { api, type APIChannel } from '../api';
 import { VoiceStatusBar } from './VoiceStatusBar';
@@ -338,6 +340,14 @@ function ChannelContextMenu({
           label="Kanalı Düzenle"
           onClick={() => {
             dispatch(openEditChannel(channel.id));
+            onClose();
+          }}
+        />
+        <CtxItem
+          icon={<Lock size={14} />}
+          label="Kanal İzinleri"
+          onClick={() => {
+            dispatch(openChannelPerms(channel.id));
             onClose();
           }}
         />

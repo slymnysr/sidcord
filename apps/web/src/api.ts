@@ -456,6 +456,14 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify(input),
       }),
+    listOverrides: (channelId: string) =>
+      request<
+        Array<{ channel_id: string; target_type: 'role' | 'user'; target_id: string; allow: string; deny: string }>
+      >(`/channels/${channelId}/overrides`),
+    deleteOverride: (channelId: string, targetType: 'role' | 'user', targetId: string) =>
+      request<void>(`/channels/${channelId}/overrides/${targetType}/${targetId}`, {
+        method: 'DELETE',
+      }),
     messages: (channelId: string, before?: string, limit = 50) => {
       const q = new URLSearchParams();
       if (before) q.set('before', before);

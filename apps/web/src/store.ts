@@ -382,6 +382,7 @@ interface UiState {
     | 'search'
     | 'create_channel'
     | 'edit_channel'
+    | 'channel_perms'
     | null;
   editingChannelId: string | null;
   profileCardUserId: string | null;
@@ -429,6 +430,10 @@ const uiSlice = createSlice({
       state.modal = 'edit_channel';
       state.editingChannelId = action.payload;
     },
+    openChannelPerms(state, action: PayloadAction<string>) {
+      state.modal = 'channel_perms';
+      state.editingChannelId = action.payload;
+    },
     openProfileCard(
       state,
       action: PayloadAction<{ userId: string; anchorRect?: DOMRect | null } | null>,
@@ -454,7 +459,7 @@ export const { pushMessage, updateMessage, removeMessage } = messagesSlice.actio
 export const { upsertUser } = usersSlice.actions;
 export const { setGuildPresence } = presenceSlice.actions;
 export const { setTyping, pruneTyping } = typingSlice.actions;
-export const { toggleMemberList, openModal, closeModal, setMode, selectDM, openProfileCard, setPendingDM, openEditChannel } = uiSlice.actions;
+export const { toggleMemberList, openModal, closeModal, setMode, selectDM, openProfileCard, setPendingDM, openEditChannel, openChannelPerms } = uiSlice.actions;
 
 // === Mode switching thunks ===
 // DM moduna geçince çalışan kanalı temizle/son DM'i geri yükle.
