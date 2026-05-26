@@ -296,7 +296,7 @@ export const api = {
         body: JSON.stringify({ name, icon_text: iconText, icon_color: iconColor }),
       }),
     channels: (guildId: string) => request<APIChannel[]>(`/guilds/${guildId}/channels`),
-    createChannel: (guildId: string, name: string, type: 'text' | 'voice' | 'announcement' | 'forum' | 'category' = 'text') =>
+    createChannel: (guildId: string, name: string, type: 'text' | 'voice' | 'announcement' | 'forum' | 'stage' | 'category' = 'text') =>
       request<APIChannel>('/channels', {
         method: 'POST',
         body: JSON.stringify({ guild_id: guildId, name, type }),
@@ -433,6 +433,14 @@ export const api = {
       },
     ) =>
       request<void>(`/channels/${channelId}/notif-settings`, {
+        method: 'PUT',
+        body: JSON.stringify(input),
+      }),
+    upsertOverride: (
+      channelId: string,
+      input: { target_type: 'role' | 'user'; target_id: string; allow: string; deny: string },
+    ) =>
+      request<void>(`/channels/${channelId}/overrides`, {
         method: 'PUT',
         body: JSON.stringify(input),
       }),
