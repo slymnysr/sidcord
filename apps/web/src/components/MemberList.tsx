@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useAppSelector } from '../store';
+import { useAppDispatch, useAppSelector, openProfileCard } from '../store';
 import type { APIMember } from '../api';
 
 export function MemberList() {
@@ -47,6 +47,7 @@ function Group({
   members: APIMember[];
   online: boolean;
 }) {
+  const dispatch = useAppDispatch();
   return (
     <section className="mb-5">
       <div className="px-4 mb-2 text-[11px] font-bold text-ink-tertiary uppercase tracking-[0.08em] flex items-center justify-between">
@@ -56,7 +57,13 @@ function Group({
       <ul className="px-2 space-y-0.5">
         {members.map((m) => (
           <li key={m.user_id}>
-            <button className="w-full px-2 py-1.5 rounded-md hover:bg-surface-2 flex items-center gap-3 text-left transition-colors">
+            <button
+              onClick={(e) => {
+                const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                dispatch(openProfileCard({ userId: m.user_id, anchorRect: rect }));
+              }}
+              className="w-full px-2 py-1.5 rounded-md hover:bg-surface-2 flex items-center gap-3 text-left transition-colors"
+            >
               <div className="relative shrink-0">
                 <div
                   className={

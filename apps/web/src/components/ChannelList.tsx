@@ -45,6 +45,15 @@ export function ChannelList() {
             Sol kenardan bir sunucu seç veya oluştur.
           </p>
         )}
+        {guildId && (
+          <button
+            onClick={() => dispatch(openModal('create_channel'))}
+            className="w-full text-left px-3 py-2 rounded-md flex items-center gap-2 text-ink-secondary hover:bg-surface-2 hover:text-brand-500 transition-colors border border-dashed border-line hover:border-brand-500/40"
+          >
+            <span className="text-lg leading-none">+</span>
+            <span className="text-sm font-medium">Kanal Oluştur</span>
+          </button>
+        )}
         {guildId && all.length === 0 && (
           <p className="text-sm text-ink-tertiary px-2 py-6 text-center">Kanal yok.</p>
         )}

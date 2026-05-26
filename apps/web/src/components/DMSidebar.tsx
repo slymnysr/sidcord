@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { UserPlus, MessageSquare, Hash } from 'lucide-react';
-import { api, type APIDMChannel, type APIUser } from '../api';
+import { UserPlus, Hash } from 'lucide-react';
+import { api, type APIDMChannel, type APIPublicUser } from '../api';
 import { useAppDispatch, useAppSelector, openModal, selectDM, setMode, selectChannel } from '../store';
 
 export function DMSidebar() {
@@ -8,27 +8,28 @@ export function DMSidebar() {
   const me = useAppSelector((s) => s.auth.user);
   const selectedDMId = useAppSelector((s) => s.ui.selectedDMChannelId);
   const [dms, setDMs] = useState<APIDMChannel[]>([]);
-  const [partners] = useState<Record<string, APIUser>>({});
+  const [partners, setPartners] = useState<Record<string, APIPublicUser>>({});
 
   async function refresh() {
     try {
       const list = await api.dms.list();
       setDMs(list);
-      // Karşı taraf kullanıcılarını çek
       const userIds = new Set<string>();
       for (const dm of list) {
         for (const p of dm.participants) {
           if (p !== me?.id) userIds.add(p);
         }
       }
-      const lookups = await Promise.all(
-        Array.from(userIds).map((id) =>
-          fetch(`/api/v1/users/me`, { headers: { Authorization: 'Bearer ' + localStorage.getItem('sidcord_access') } })
-            .then(() => id) // not used; we need to fetch user by id — yapılacak
-            .catch(() => id),
-        ),
+      const ids = Array.from(userIds);
+      const results = await Promise.all(
+        ids.map((id) => api.users.user(id).catch(() => null)),
       );
-      void lookups;
+      const next: Record<string, APIPublicUser> = {};
+      for (let i = 0; i < ids.length; i++) {
+        const u = results[i];
+        if (u) next[ids[i]] = u;
+      }
+      setPartners(next);
     } catch (e) {
       console.warn('dm refresh', e);
     }
@@ -116,9 +117,3 @@ export function DMSidebar() {
   );
 }
 
-// Helper not used yet — DM partners enrichment yapacağız (faz 5.13.x)
-export function useDMPartners() {
-  return {};
-}
-
-void MessageSquare;

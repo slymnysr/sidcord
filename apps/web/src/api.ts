@@ -114,6 +114,21 @@ export interface APIBan {
   banned_at: string;
 }
 
+export interface APIPublicUser {
+  id: Snowflake;
+  username: string;
+  display_name: string;
+  avatar_color: string;
+  avatar_url?: string;
+  banner_url?: string;
+  bio?: string;
+  status: 'online' | 'idle' | 'dnd' | 'offline';
+  bot: boolean;
+  created_at: string;
+  friendship_state?: 'self' | 'accepted' | 'pending_sent' | 'pending_received' | 'blocked';
+  dm_channel_id?: Snowflake;
+}
+
 export interface APIDMChannel {
   id: Snowflake;
   type: 'dm' | 'group_dm';
@@ -257,6 +272,11 @@ export const api = {
   },
 
   me: () => request<APIUser>('/users/me'),
+  user: (userId: string) =>
+    request<APIPublicUser>(`/users/${userId}`),
+  users: {
+    user: (userId: string) => request<APIPublicUser>(`/users/${userId}`),
+  },
   updateStatus: (status: 'online' | 'idle' | 'dnd' | 'offline') =>
     request<void>('/users/me/status', {
       method: 'PATCH',
@@ -271,6 +291,11 @@ export const api = {
         body: JSON.stringify({ name, icon_text: iconText, icon_color: iconColor }),
       }),
     channels: (guildId: string) => request<APIChannel[]>(`/guilds/${guildId}/channels`),
+    createChannel: (guildId: string, name: string, type: 'text' | 'voice' | 'announcement' | 'forum' | 'category' = 'text') =>
+      request<APIChannel>('/channels', {
+        method: 'POST',
+        body: JSON.stringify({ guild_id: guildId, name, type }),
+      }),
     members: (guildId: string) => request<APIMember[]>(`/guilds/${guildId}/members`),
     createInvite: (guildId: string, opts: { max_uses?: number; expires_in_sec?: number } = {}) =>
       request<APIInvite>(`/guilds/${guildId}/invites`, {

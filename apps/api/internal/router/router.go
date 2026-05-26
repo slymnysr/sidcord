@@ -41,6 +41,7 @@ func New(h *handlers.Handler, iss *auth.Issuer) http.Handler {
 
 			r.Get("/users/me", h.Me)
 			r.Patch("/users/me/status", h.UpdateMyStatus)
+			r.Get("/users/{userID}", h.GetUserPublic)
 
 			r.Post("/guilds", h.CreateGuild)
 			r.Get("/guilds", h.ListMyGuilds)

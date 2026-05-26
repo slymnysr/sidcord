@@ -372,7 +372,10 @@ interface UiState {
     | 'server_settings'
     | 'friends'
     | 'search'
+    | 'create_channel'
     | null;
+  profileCardUserId: string | null;
+  profileCardAnchor: { top: number; left: number; right: number; bottom: number; width: number; height: number } | null;
 }
 
 const uiSlice = createSlice({
@@ -382,6 +385,8 @@ const uiSlice = createSlice({
     mode: 'guild',
     selectedDMChannelId: null,
     modal: null,
+    profileCardUserId: null,
+    profileCardAnchor: null,
   } as UiState,
   reducers: {
     toggleMemberList(state) {
@@ -399,9 +404,21 @@ const uiSlice = createSlice({
     selectDM(state, action: PayloadAction<string>) {
       state.mode = 'dm';
       state.selectedDMChannelId = action.payload;
-      // Channel selection ile mesajlar akacak
-      // bu reducer içinden farklı slice'a yazamayız;
-      // selectChannel ayrıca çağrılmalı
+    },
+    openProfileCard(
+      state,
+      action: PayloadAction<{ userId: string; anchorRect?: DOMRect | null } | null>,
+    ) {
+      if (!action.payload) {
+        state.profileCardUserId = null;
+        state.profileCardAnchor = null;
+        return;
+      }
+      state.profileCardUserId = action.payload.userId;
+      const r = action.payload.anchorRect;
+      state.profileCardAnchor = r
+        ? { top: r.top, left: r.left, right: r.right, bottom: r.bottom, width: r.width, height: r.height }
+        : null;
     },
   },
 });
@@ -413,7 +430,7 @@ export const { pushMessage, updateMessage, removeMessage } = messagesSlice.actio
 export const { upsertUser } = usersSlice.actions;
 export const { setGuildPresence } = presenceSlice.actions;
 export const { setTyping, pruneTyping } = typingSlice.actions;
-export const { toggleMemberList, openModal, closeModal, setMode, selectDM } = uiSlice.actions;
+export const { toggleMemberList, openModal, closeModal, setMode, selectDM, openProfileCard } = uiSlice.actions;
 
 export const store = configureStore({
   reducer: {

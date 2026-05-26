@@ -7,6 +7,7 @@ import { InviteLinkModal } from './InviteLinkModal';
 import { ServerSettingsModal } from './ServerSettingsModal';
 import { AddFriendModal } from './AddFriendModal';
 import { SearchModal } from './SearchModal';
+import { CreateChannelModal } from './CreateChannelModal';
 
 export function Modal() {
   const modal = useAppSelector((s) => s.ui.modal);
@@ -51,6 +52,7 @@ export function Modal() {
         {modal === 'server_settings' && <ServerSettingsModal />}
         {modal === 'friends' && <AddFriendModal />}
         {modal === 'search' && <SearchModal />}
+        {modal === 'create_channel' && <CreateChannelModal />}
       </div>
     </div>
   );

@@ -7,6 +7,7 @@ import {
   toggleReactionThunk,
   updateMessage,
   removeMessage,
+  openProfileCard,
 } from '../store';
 import { api, type APIReaction, type APIAttachment } from '../api';
 import { Markdown } from '../markdown';
@@ -187,12 +188,17 @@ function MessageItem({
   return (
     <li className="flex gap-3 group relative px-2 -mx-2 py-1 hover:bg-surface-1/40 rounded">
       {!grouped ? (
-        <div
-          className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-bold shrink-0"
+        <button
+          onClick={(e) => {
+            const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+            dispatch(openProfileCard({ userId: authorId, anchorRect: rect }));
+          }}
+          className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-bold shrink-0 hover:ring-2 hover:ring-brand-500/50 transition"
           style={{ backgroundColor: authorColor }}
+          title={authorName}
         >
           {authorName.slice(0, 1).toUpperCase()}
-        </div>
+        </button>
       ) : (
         <div className="w-10 shrink-0 text-[10px] text-transparent group-hover:text-ink-tertiary text-right pr-2 leading-7 select-none">
           {formatTime(ts)}
@@ -202,7 +208,15 @@ function MessageItem({
       <div className="flex-1 min-w-0">
         {!grouped && (
           <div className="flex items-baseline gap-2 mb-1">
-            <span className="font-semibold text-ink-primary text-[15px]">{authorName}</span>
+            <button
+              onClick={(e) => {
+                const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                dispatch(openProfileCard({ userId: authorId, anchorRect: rect }));
+              }}
+              className="font-semibold text-ink-primary text-[15px] hover:underline"
+            >
+              {authorName}
+            </button>
             {isBot && (
               <span className="bg-brand-500/15 text-brand-500 text-[10px] font-semibold px-1.5 py-0.5 rounded">
                 BOT

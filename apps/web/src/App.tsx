@@ -10,6 +10,7 @@ import { MemberList } from './components/MemberList';
 import { AuthPage } from './pages/AuthPage';
 import { Modal } from './components/Modal';
 import { DMSidebar } from './components/DMSidebar';
+import { UserProfileCard } from './components/UserProfileCard';
 import {
   useAppDispatch,
   useAppSelector,
@@ -26,6 +27,7 @@ import {
   setGuildPresence,
   setTyping,
   pruneTyping,
+  openProfileCard,
 } from './store';
 import { tokenStore } from './api';
 import { connectGateway, joinGuild, joinUser, disconnectGateway, onGuildEvent } from './gateway';
@@ -39,6 +41,8 @@ export default function App() {
   const channel = channels?.find((c) => c.id === channelId);
   const mode = useAppSelector((s) => s.ui.mode);
   const showMembers = useAppSelector((s) => s.ui.showMemberList);
+  const profileCardUserId = useAppSelector((s) => s.ui.profileCardUserId);
+  const profileCardAnchor = useAppSelector((s) => s.ui.profileCardAnchor);
 
   // İlk yüklemede /me dene (token var ise)
   useEffect(() => {
@@ -131,6 +135,13 @@ export default function App() {
         </div>
       </main>
       <Modal />
+      {profileCardUserId && (
+        <UserProfileCard
+          userId={profileCardUserId}
+          anchorRect={profileCardAnchor}
+          onClose={() => dispatch(openProfileCard(null))}
+        />
+      )}
     </div>
   );
 }
