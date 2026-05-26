@@ -103,6 +103,24 @@ func (r *DMs) ListForUser(ctx context.Context, userID int64) ([]DMChannel, error
 	return list, rows.Err()
 }
 
+// Participants — DM kanalının tüm katılımcı user_id'leri
+func (r *DMs) Participants(ctx context.Context, channelID int64) ([]int64, error) {
+	rows, err := r.pool.Query(ctx, `SELECT user_id FROM dm_participants WHERE channel_id = $1`, channelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func (r *DMs) IsParticipant(ctx context.Context, channelID, userID int64) (bool, error) {
 	var exists bool
 	err := r.pool.QueryRow(ctx, `

@@ -8,8 +8,9 @@ import {
   updateMessage,
   removeMessage,
   openProfileCard,
+  upsertUser,
 } from '../store';
-import { api, type APIReaction, type APIAttachment } from '../api';
+import { api, type APIReaction, type APIAttachment, type APIUser } from '../api';
 import { Markdown } from '../markdown';
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '🎉', '😮', '😢', '🔥', '👀'];
@@ -28,11 +29,48 @@ export function MessageList() {
   const list = useAppSelector((s) => (channelId ? s.messages.byChannel[channelId] ?? [] : []));
   const users = useAppSelector((s) => s.users.byId);
   const me = useAppSelector((s) => s.auth.user);
+  const dispatch = useAppDispatch();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [list.length, channelId]);
+
+  // Mesajlarda cache'de olmayan author'ları topluca çek (DM ve sunucu için)
+  useEffect(() => {
+    const missing = new Set<string>();
+    for (const m of list) {
+      if (!users[m.author_id] && m.author_id !== me?.id) missing.add(m.author_id);
+    }
+    if (missing.size === 0) return;
+    let cancelled = false;
+    (async () => {
+      for (const id of missing) {
+        try {
+          const u = await api.users.user(id);
+          if (!cancelled) {
+            dispatch(
+              upsertUser({
+                id: u.id,
+                username: u.username,
+                email: '',
+                display_name: u.display_name,
+                avatar_color: u.avatar_color,
+                avatar_url: u.avatar_url,
+                bio: u.bio,
+                status: u.status,
+                bot: u.bot,
+                created_at: u.created_at,
+              } as APIUser),
+            );
+          }
+        } catch {}
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [list, users, me?.id, dispatch]);
 
   if (!channel) {
     return (
@@ -73,7 +111,7 @@ export function MessageList() {
               key={m.id}
               messageId={m.id}
               authorId={m.author_id}
-              authorName={author?.display_name ?? 'Bilinmeyen'}
+              authorName={author?.display_name ?? '...'}
               authorColor={author?.avatar_color ?? '#6B7280'}
               isBot={!!author?.bot}
               ts={curTs}

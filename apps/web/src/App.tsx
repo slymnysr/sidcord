@@ -45,12 +45,17 @@ export default function App() {
   const profileCardUserId = useAppSelector((s) => s.ui.profileCardUserId);
   const profileCardAnchor = useAppSelector((s) => s.ui.profileCardAnchor);
 
-  // İlk yüklemede /me dene (token var ise)
+  // F5 flash önlemi: token varsa /me tamamlanana kadar splash göster
+  const [bootChecking, setBootChecking] = useState<boolean>(!!tokenStore.access() && !user);
+
   useEffect(() => {
     if (tokenStore.access() && !user) {
-      dispatch(fetchMe());
+      dispatch(fetchMe()).finally(() => setBootChecking(false));
+    } else {
+      setBootChecking(false);
     }
-  }, [dispatch, user]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Login sonrası guild'leri çek + user kanalına abone ol
   useEffect(() => {
@@ -119,6 +124,19 @@ export default function App() {
     dispatch(fetchMessages(channelId));
   }, [channelId, dispatch]);
 
+  if (bootChecking) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-bg">
+        <img
+          src="/brand/logo.svg"
+          width={80}
+          height={80}
+          alt="Sidcord"
+          className="animate-pulse"
+        />
+      </div>
+    );
+  }
   if (!user) return <AuthPage />;
 
   const dmHubVisible = mode === 'dm' && !channelId;

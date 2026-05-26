@@ -164,7 +164,29 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Mention parse + bildirim
-	h.parseAndPersistMentions(r.Context(), ch, m)
+	mentioned := h.parseAndPersistMentions(r.Context(), ch, m)
+
+	// DM mesajları için: mention dışında kalan diğer katılımcılara dm_message bildirimi
+	if ch.GuildID == nil {
+		others, _ := h.DMs.Participants(r.Context(), ch.ID)
+		mentionedSet := map[int64]bool{}
+		for _, mid := range mentioned {
+			mentionedSet[mid] = true
+		}
+		for _, pid := range others {
+			if pid == uid || mentionedSet[pid] {
+				continue
+			}
+			_ = h.Notifications.Create(r.Context(), &repo.Notification{
+				ID:        h.IDs.Next(),
+				UserID:    pid,
+				Type:      "dm_message",
+				ChannelID: &ch.ID,
+				MessageID: &m.ID,
+				ActorID:   &uid,
+			})
+		}
+	}
 
 	h.publishMessage(r.Context(), ch, m)
 
