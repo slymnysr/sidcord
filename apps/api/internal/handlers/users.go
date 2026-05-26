@@ -10,7 +10,9 @@ import (
 )
 
 type updateStatusReq struct {
-	Status string `json:"status"`
+	Status            string  `json:"status,omitempty"`
+	CustomStatusText  *string `json:"custom_status_text,omitempty"`
+	CustomStatusEmoji *string `json:"custom_status_emoji,omitempty"`
 }
 
 func (h *Handler) UpdateMyStatus(w http.ResponseWriter, r *http.Request) {
@@ -19,18 +21,24 @@ func (h *Handler) UpdateMyStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	switch req.Status {
-	case "online", "idle", "dnd", "offline":
-	default:
-		writeError(w, http.StatusBadRequest, "invalid_status", "geçersiz durum")
-		return
-	}
 	uid := middleware.UserIDFrom(r.Context())
-	_, err := h.Pool.Exec(r.Context(),
-		`UPDATE users SET status = $1 WHERE id = $2`, req.Status, uid)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", "güncellenemedi")
-		return
+	if req.Status != "" {
+		switch req.Status {
+		case "online", "idle", "dnd", "offline":
+		default:
+			writeError(w, http.StatusBadRequest, "invalid_status", "geçersiz durum")
+			return
+		}
+		if _, err := h.Pool.Exec(r.Context(), `UPDATE users SET status = $1 WHERE id = $2`, req.Status, uid); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "güncellenemedi")
+			return
+		}
+	}
+	if req.CustomStatusText != nil {
+		_, _ = h.Pool.Exec(r.Context(), `UPDATE users SET custom_status_text = $1 WHERE id = $2`, *req.CustomStatusText, uid)
+	}
+	if req.CustomStatusEmoji != nil {
+		_, _ = h.Pool.Exec(r.Context(), `UPDATE users SET custom_status_emoji = $1 WHERE id = $2`, *req.CustomStatusEmoji, uid)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

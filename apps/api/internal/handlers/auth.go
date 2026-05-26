@@ -239,3 +239,42 @@ var brandColors = []string{
 func randomBrandColor() string {
 	return brandColors[time.Now().UnixNano()%int64(len(brandColors))]
 }
+
+type changePasswordReq struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
+// PATCH /api/v1/users/me/password
+func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	var req changePasswordReq
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if len(req.NewPassword) < 8 {
+		writeError(w, http.StatusBadRequest, "weak_password", "yeni parola en az 8 karakter")
+		return
+	}
+	uid := middleware.UserIDFrom(r.Context())
+	user, err := h.Users.ByID(r.Context(), uid)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "kullanıcı")
+		return
+	}
+	ok, err := auth.VerifyPassword(req.CurrentPassword, user.PasswordHash)
+	if err != nil || !ok {
+		writeError(w, http.StatusForbidden, "wrong_password", "mevcut parola yanlış")
+		return
+	}
+	newHash, err := auth.HashPassword(req.NewPassword)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "hash")
+		return
+	}
+	if _, err := h.Pool.Exec(r.Context(), `UPDATE users SET password_hash = $1 WHERE id = $2`, newHash, uid); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "kaydedilemedi")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

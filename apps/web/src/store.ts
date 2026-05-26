@@ -383,6 +383,7 @@ interface UiState {
     | 'create_channel'
     | 'edit_channel'
     | 'channel_perms'
+    | 'user_settings'
     | null;
   editingChannelId: string | null;
   profileCardUserId: string | null;

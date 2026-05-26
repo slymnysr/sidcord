@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Volume2, ScreenShare, Video, PhoneCall, Mic } from 'lucide-react';
+import { Volume2, ScreenShare, Video, PhoneCall, Mic, Users, MessageCircle, X } from 'lucide-react';
 import { voice } from './voice';
 import { ServerRail } from './components/ServerRail';
 import { ChannelList } from './components/ChannelList';
@@ -191,23 +191,232 @@ export default function App() {
 
 function FriendsHub() {
   const dispatch = useAppDispatch();
+  const [tab, setTab] = useState<'online' | 'all' | 'pending' | 'blocked'>('online');
+  const [friends, setFriends] = useState<Awaited<ReturnType<typeof import('./api').api.friends.list>>>(
+    [],
+  );
+
+  async function refresh() {
+    try {
+      const { api } = await import('./api');
+      setFriends(await api.friends.list());
+    } catch {}
+  }
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  const filtered = friends.filter((f) => {
+    if (tab === 'online') return f.friendship_state === 'accepted' && f.status !== 'offline';
+    if (tab === 'all') return f.friendship_state === 'accepted';
+    if (tab === 'pending')
+      return f.friendship_state === 'pending_sent' || f.friendship_state === 'pending_received';
+    if (tab === 'blocked') return f.friendship_state === 'blocked';
+    return false;
+  });
+
   return (
-    <div className="flex-1 flex flex-col items-center justify-center bg-bg text-center px-6">
-      <div className="w-24 h-24 rounded-3xl bg-brand-500/10 text-brand-500 flex items-center justify-center mb-6">
-        <img src="/brand/logo.svg" width={64} height={64} alt="" />
+    <div className="flex-1 flex flex-col bg-bg overflow-hidden">
+      <div className="h-14 border-b border-line px-5 flex items-center gap-1">
+        <Users size={20} className="text-ink-tertiary mr-2" />
+        <h1 className="text-ink-primary font-semibold mr-4">Arkadaşlar</h1>
+        <span className="w-px h-6 bg-line mx-1" />
+        <FriendTab active={tab === 'online'} onClick={() => setTab('online')}>
+          Çevrimiçi
+        </FriendTab>
+        <FriendTab active={tab === 'all'} onClick={() => setTab('all')}>
+          Tümü
+        </FriendTab>
+        <FriendTab active={tab === 'pending'} onClick={() => setTab('pending')}>
+          Bekleyen
+        </FriendTab>
+        <FriendTab active={tab === 'blocked'} onClick={() => setTab('blocked')}>
+          Engelli
+        </FriendTab>
+        <button
+          onClick={() => dispatch(openModal('friends'))}
+          className="ml-2 px-3 py-1.5 rounded-md bg-status-online/15 hover:bg-status-online/25 text-status-online text-sm font-semibold"
+        >
+          Arkadaş Ekle
+        </button>
       </div>
-      <h2 className="text-2xl font-bold text-ink-primary mb-2">Arkadaşlar</h2>
-      <p className="text-ink-secondary max-w-md mb-6">
-        Soldaki listeden bir konuşma seç veya bir kişiye mesaj göndermek için profil kartından
-        başla.
-      </p>
-      <button
-        onClick={() => dispatch(openModal('friends'))}
-        className="px-5 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-400 text-white font-semibold transition-colors"
-      >
-        Arkadaş Ekle
-      </button>
+
+      <div className="flex-1 overflow-y-auto px-6 py-4">
+        <div className="text-[11px] font-bold uppercase text-ink-tertiary tracking-wider mb-3">
+          {tab === 'online'
+            ? 'Çevrimiçi'
+            : tab === 'all'
+              ? 'Tüm Arkadaşlar'
+              : tab === 'pending'
+                ? 'Bekleyen İstekler'
+                : 'Engelli'}{' '}
+          — {filtered.length}
+        </div>
+
+        {filtered.length === 0 ? (
+          <p className="text-ink-tertiary text-center py-12">
+            {tab === 'online'
+              ? 'Hiçbir arkadaşın çevrimiçi değil. Yalnız değilsin sıkıntı yok.'
+              : tab === 'pending'
+                ? 'Bekleyen istek yok.'
+                : tab === 'blocked'
+                  ? 'Engellediğin kimse yok.'
+                  : 'Henüz arkadaşın yok.'}
+          </p>
+        ) : (
+          <ul className="divide-y divide-line">
+            {filtered.map((f) => (
+              <FriendRow key={f.user_id} f={f} tab={tab} onRefresh={refresh} />
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
+  );
+}
+
+function FriendTab({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={
+        'px-3 py-1 rounded-md text-sm font-medium transition-colors ' +
+        (active
+          ? 'bg-surface-2 text-ink-primary'
+          : 'text-ink-secondary hover:bg-surface-2/50 hover:text-ink-primary')
+      }
+    >
+      {children}
+    </button>
+  );
+}
+
+function FriendRow({
+  f,
+  tab,
+  onRefresh,
+}: {
+  f: any;
+  tab: 'online' | 'all' | 'pending' | 'blocked';
+  onRefresh: () => void;
+}) {
+  const dispatch = useAppDispatch();
+  const statusColor: Record<string, string> = {
+    online: 'bg-status-online',
+    idle: 'bg-status-idle',
+    dnd: 'bg-status-dnd',
+    offline: 'bg-status-offline',
+  };
+
+  async function openDM() {
+    const { api } = await import('./api');
+    try {
+      const r = await api.dms.open(f.user_id);
+      dispatch({ type: 'ui/setMode', payload: 'dm' });
+      dispatch({ type: 'ui/selectDM', payload: r.channel_id });
+      dispatch({ type: 'channels/selectChannel', payload: r.channel_id });
+    } catch {}
+  }
+
+  async function remove() {
+    const { api } = await import('./api');
+    await api.friends.remove(f.user_id).catch(() => {});
+    onRefresh();
+  }
+
+  async function accept() {
+    const { api } = await import('./api');
+    await api.friends.accept(f.user_id).catch(() => {});
+    onRefresh();
+  }
+
+  async function unblock() {
+    const { api } = await import('./api');
+    await api.unblock(f.user_id).catch(() => {});
+    onRefresh();
+  }
+
+  return (
+    <li className="flex items-center gap-3 py-3 group hover:bg-surface-1/40 -mx-2 px-2 rounded">
+      <button
+        onClick={(e) =>
+          dispatch({
+            type: 'ui/openProfileCard',
+            payload: { userId: f.user_id, anchorRect: e.currentTarget.getBoundingClientRect() },
+          })
+        }
+        className="relative shrink-0"
+      >
+        <div
+          className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-bold"
+          style={{ backgroundColor: f.avatar_color }}
+        >
+          {f.display_name.slice(0, 1).toUpperCase()}
+        </div>
+        <span
+          className={
+            'absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full ring-2 ring-bg ' +
+            (statusColor[f.status] ?? 'bg-status-offline')
+          }
+        />
+      </button>
+      <div className="flex-1 min-w-0">
+        <div className="font-semibold text-ink-primary truncate">{f.display_name}</div>
+        <div className="text-xs text-ink-tertiary truncate">
+          @{f.username} ·{' '}
+          {f.friendship_state === 'pending_sent'
+            ? 'İstek gönderildi'
+            : f.friendship_state === 'pending_received'
+              ? 'Sana istek gönderdi'
+              : f.friendship_state === 'blocked'
+                ? 'Engelli'
+                : f.status}
+        </div>
+      </div>
+      <div className="flex gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
+        {tab === 'pending' && f.friendship_state === 'pending_received' && (
+          <button
+            onClick={accept}
+            className="px-3 py-1.5 rounded-md bg-status-online/15 hover:bg-status-online/25 text-status-online text-xs font-semibold"
+          >
+            Kabul Et
+          </button>
+        )}
+        {tab !== 'blocked' && f.friendship_state === 'accepted' && (
+          <button
+            onClick={openDM}
+            title="DM"
+            className="w-9 h-9 rounded-full bg-surface-2 hover:bg-surface-3 text-ink-secondary hover:text-ink-primary flex items-center justify-center"
+          >
+            <MessageCircle size={16} />
+          </button>
+        )}
+        {tab === 'blocked' ? (
+          <button
+            onClick={unblock}
+            className="px-3 py-1.5 rounded-md bg-surface-2 hover:bg-status-online/25 hover:text-status-online text-ink-secondary text-xs font-semibold"
+          >
+            Engeli Kaldır
+          </button>
+        ) : (
+          <button
+            onClick={remove}
+            title="Arkadaşlıktan çıkar"
+            className="w-9 h-9 rounded-full bg-surface-2 hover:bg-accent-500 hover:text-white text-ink-secondary flex items-center justify-center"
+          >
+            <X size={16} />
+          </button>
+        )}
+      </div>
+    </li>
   );
 }
 

@@ -288,6 +288,20 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify({ status }),
     }),
+  updateCustomStatus: (input: { custom_status_text?: string | null; custom_status_emoji?: string | null }) =>
+    request<void>('/users/me/status', {
+      method: 'PATCH',
+      body: JSON.stringify(input),
+    }),
+  changePassword: (current: string, next: string) =>
+    request<void>('/users/me/password', {
+      method: 'PATCH',
+      body: JSON.stringify({ current_password: current, new_password: next }),
+    }),
+  block: (userId: string) =>
+    request<void>(`/users/${userId}/block`, { method: 'PUT' }),
+  unblock: (userId: string) =>
+    request<void>(`/users/${userId}/block`, { method: 'DELETE' }),
 
   guilds: {
     list: () => request<APIGuild[]>('/guilds'),
@@ -503,6 +517,24 @@ export const api = {
       ),
     delete: (channelId: string) =>
       request<void>(`/stage-instances/${channelId}`, { method: 'DELETE' }),
+  },
+
+  friends: {
+    list: () =>
+      request<
+        Array<{
+          user_id: Snowflake;
+          username: string;
+          display_name: string;
+          avatar_color: string;
+          status: 'online' | 'idle' | 'dnd' | 'offline';
+          friendship_state: 'accepted' | 'pending_sent' | 'pending_received' | 'blocked';
+        }>
+      >('/friends'),
+    send: (input: { username?: string; user_id?: string }) =>
+      request<void>('/friends', { method: 'POST', body: JSON.stringify(input) }),
+    accept: (userId: string) => request<void>(`/friends/${userId}/accept`, { method: 'PUT' }),
+    remove: (userId: string) => request<void>(`/friends/${userId}`, { method: 'DELETE' }),
   },
 
   emojis: {

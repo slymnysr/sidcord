@@ -10,6 +10,7 @@ import { SearchModal } from './SearchModal';
 import { CreateChannelModal } from './CreateChannelModal';
 import { ChannelEditModal } from './ChannelEditModal';
 import { ChannelPermissionsModal } from './ChannelPermissionsModal';
+import { UserSettingsModal } from './UserSettingsModal';
 
 export function Modal() {
   const modal = useAppSelector((s) => s.ui.modal);
@@ -41,7 +42,7 @@ export function Modal() {
         onClick={(e) => e.stopPropagation()}
         className={
           'bg-surface-1 border border-line rounded-2xl shadow-2xl relative ring-1 ring-white/5 ' +
-          (modal === 'server_settings'
+          (modal === 'server_settings' || modal === 'user_settings'
             ? 'w-full max-w-4xl'
             : modal === 'channel_perms'
               ? 'w-full max-w-3xl overflow-hidden'
@@ -66,6 +67,7 @@ export function Modal() {
         {modal === 'create_channel' && <CreateChannelModal />}
         {modal === 'edit_channel' && editingChannel && <ChannelEditModal channel={editingChannel} />}
         {modal === 'channel_perms' && editingChannel && <ChannelPermissionsModal channel={editingChannel} />}
+        {modal === 'user_settings' && <UserSettingsModal />}
       </div>
     </div>
   );

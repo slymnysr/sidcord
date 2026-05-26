@@ -93,6 +93,9 @@ func New(h *handlers.Handler, iss *auth.Issuer) http.Handler {
 			r.Post("/friends", h.SendFriendRequest)
 			r.Put("/friends/{userID}/accept", h.AcceptFriend)
 			r.Delete("/friends/{userID}", h.RemoveFriend)
+			r.Put("/users/{userID}/block", h.BlockUser)
+			r.Delete("/users/{userID}/block", h.UnblockUser)
+			r.Patch("/users/me/password", h.ChangePassword)
 
 			r.Get("/search/messages", h.SearchMessages)
 

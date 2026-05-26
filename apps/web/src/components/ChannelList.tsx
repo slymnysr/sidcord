@@ -629,6 +629,14 @@ function UserPanel() {
       </div>
       <button
         type="button"
+        onClick={() => dispatch(openModal('user_settings'))}
+        title="Kullanıcı Ayarları"
+        className="w-8 h-8 rounded-md hover:bg-surface-3 text-ink-secondary hover:text-brand-500 flex items-center justify-center transition-colors"
+      >
+        <Settings size={16} />
+      </button>
+      <button
+        type="button"
         onClick={() => dispatch(logout())}
         title="Çıkış"
         className="w-8 h-8 rounded-md hover:bg-surface-3 text-ink-secondary hover:text-accent-500 flex items-center justify-center transition-colors"

@@ -87,6 +87,48 @@ func (h *Handler) AcceptFriend(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// BlockUser — kullanıcıyı engelle (mevcut friendships state'i 'blocked' yap)
+func (h *Handler) BlockUser(w http.ResponseWriter, r *http.Request) {
+	otherID, err := strconv.ParseInt(chi.URLParam(r, "userID"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "id parse")
+		return
+	}
+	uid := middleware.UserIDFrom(r.Context())
+	if uid == otherID {
+		writeError(w, http.StatusBadRequest, "self", "kendini engelleyemezsin")
+		return
+	}
+	_, err = h.Pool.Exec(r.Context(), `
+        INSERT INTO friendships (user_a_id, user_b_id, status, requested_by)
+        VALUES (LEAST($1, $2), GREATEST($1, $2), 'blocked', $1)
+        ON CONFLICT (user_a_id, user_b_id) DO UPDATE
+        SET status = 'blocked', requested_by = EXCLUDED.requested_by, updated_at = NOW()
+    `, uid, otherID)
+	if err != nil {
+		h.logger.Error("block", zap.Error(err))
+		writeError(w, http.StatusInternalServerError, "internal", "engellenemedi")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// UnblockUser — engeli kaldır (friendships satırını sil)
+func (h *Handler) UnblockUser(w http.ResponseWriter, r *http.Request) {
+	otherID, err := strconv.ParseInt(chi.URLParam(r, "userID"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "id parse")
+		return
+	}
+	uid := middleware.UserIDFrom(r.Context())
+	_, _ = h.Pool.Exec(r.Context(), `
+        DELETE FROM friendships
+        WHERE user_a_id = LEAST($1, $2) AND user_b_id = GREATEST($1, $2)
+          AND status = 'blocked' AND requested_by = $1
+    `, uid, otherID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *Handler) RemoveFriend(w http.ResponseWriter, r *http.Request) {
 	otherID, err := strconv.ParseInt(chi.URLParam(r, "userID"), 10, 64)
 	if err != nil {
