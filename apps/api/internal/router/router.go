@@ -138,6 +138,11 @@ func New(h *handlers.Handler, iss *auth.Issuer) http.Handler {
 			r.Post("/users/me/group-channels", h.CreateGroupDM)
 			r.Put("/channels/{channelID}/recipients/{userID}", h.AddGroupDMRecipient)
 			r.Delete("/channels/{channelID}/recipients/{userID}", h.RemoveGroupDMRecipient)
+
+			// P1: AutoMod
+			r.Get("/guilds/{id}/automod-rules", h.ListAutomodRules)
+			r.Post("/guilds/{id}/automod-rules", h.CreateAutomodRule)
+			r.Delete("/guilds/{id}/automod-rules/{ruleID}", h.DeleteAutomodRule)
 		})
 
 		// Webhook execute — anonim (token URL içinde doğrulanır)

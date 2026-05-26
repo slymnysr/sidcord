@@ -76,6 +76,23 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// AutoMod kontrolü (ManageGuild izni varsa muaf)
+		if !perms.Has(chanPerms, perms.ManageGuild) && h.AutoMod != nil {
+			roleIDs, _ := h.Roles.MemberRoleIDs(r.Context(), *ch.GuildID, uid)
+			decision := h.AutoMod.Inspect(r.Context(), *ch.GuildID, ch.ID, roleIDs, req.Content)
+			if decision != nil && decision.Triggered {
+				h.AutoMod.LogAction(r.Context(), h.IDs.Next(), decision.RuleID, *ch.GuildID, uid, ch.ID,
+					req.Content, decision.MatchedText, "block")
+				for _, a := range decision.Actions {
+					if a.Type == "block" || a.Type == "delete" {
+						writeError(w, http.StatusForbidden, "automod_blocked",
+							"Mesaj AutoMod kuralı '"+decision.RuleName+"' tarafından engellendi (eşleşen: "+decision.MatchedText+")")
+						return
+					}
+				}
+			}
+		}
+
 		// Slowmode enforcement (ManageMessages izni varsa muaf)
 		if ch.RateLimitSec > 0 && !perms.Has(chanPerms, perms.ManageMessages) {
 			var lastAt *time.Time

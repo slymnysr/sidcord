@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"github.com/sidcord/api/internal/auth"
+	"github.com/sidcord/api/internal/automod"
 	"github.com/sidcord/api/internal/config"
 	"github.com/sidcord/api/internal/events"
 	"github.com/sidcord/api/internal/repo"
@@ -26,6 +27,7 @@ type Handler struct {
 	Redis   *redis.Client
 	Storage *storage.Storage
 	Events  *events.Publisher
+	AutoMod *automod.Engine
 
 	Users         *repo.Users
 	Guilds        *repo.Guilds
@@ -56,6 +58,7 @@ func New(logger *zap.Logger, cfg *config.Config, pool *pgxpool.Pool, rdb *redis.
 		Redis:         rdb,
 		Storage:       store,
 		Events:        events.New(rdb),
+		AutoMod:       automod.New(pool),
 		Users:         repo.NewUsers(pool),
 		Guilds:        repo.NewGuilds(pool),
 		Channels:      repo.NewChannels(pool),
