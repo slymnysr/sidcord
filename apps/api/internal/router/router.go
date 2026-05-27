@@ -174,6 +174,21 @@ func New(h *handlers.Handler, iss *auth.Issuer) http.Handler {
 			// P2: Push subscriptions
 			r.Put("/users/me/push-subscriptions", h.SubscribePush)
 			r.Delete("/users/me/push-subscriptions", h.UnsubscribePush)
+
+			// P3: Slash Commands
+			r.Get("/guilds/{id}/commands", h.ListCommands)
+			r.Post("/guilds/{id}/commands", h.CreateCommand)
+			r.Delete("/commands/{id}", h.DeleteCommand)
+			r.Post("/channels/{channelID}/commands/run", h.RunCommand)
+
+			// P3: Server Folders
+			r.Get("/users/me/folders", h.ListFolders)
+			r.Post("/users/me/folders", h.CreateFolder)
+			r.Patch("/folders/{id}", h.UpdateFolder)
+			r.Delete("/folders/{id}", h.DeleteFolder)
+
+			// P3: Link embeds
+			r.Get("/messages/{messageID}/embeds", h.GetMessageEmbeds)
 		})
 
 		// Webhook execute — anonim (token URL içinde doğrulanır)

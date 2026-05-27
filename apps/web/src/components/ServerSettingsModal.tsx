@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Settings, Shield, Ban, Trash2, Plus, Check, Calendar, Volume2, Play, X, Smile, Sticker } from 'lucide-react';
+import { Settings, Shield, Ban, Trash2, Plus, Check, Calendar, Volume2, Play, X, Smile, Sticker, Slash } from 'lucide-react';
 import { useAppSelector } from '../store';
 import { api, type APIRole, type APIBan, type APIMember } from '../api';
 import { PERM, PERM_LABELS, has, toggle } from '../perms';
 
-type Tab = 'overview' | 'roles' | 'members' | 'bans' | 'events' | 'soundboard' | 'emojis' | 'stickers';
+type Tab = 'overview' | 'roles' | 'members' | 'bans' | 'events' | 'soundboard' | 'emojis' | 'stickers' | 'commands';
 
 export function ServerSettingsModal() {
   const guild = useAppSelector((s) => s.guilds.list.find((g) => g.id === s.guilds.selectedId));
@@ -42,6 +42,9 @@ export function ServerSettingsModal() {
         <TabBtn icon={<Sticker size={16} />} active={tab === 'stickers'} onClick={() => setTab('stickers')}>
           Etiketler
         </TabBtn>
+        <TabBtn icon={<Slash size={16} />} active={tab === 'commands'} onClick={() => setTab('commands')}>
+          Slash Komutları
+        </TabBtn>
       </nav>
 
       <div className="flex-1 overflow-y-auto p-6">
@@ -53,6 +56,7 @@ export function ServerSettingsModal() {
         {tab === 'soundboard' && <SoundboardTab guildId={guild.id} />}
         {tab === 'emojis' && <EmojisTab guildId={guild.id} />}
         {tab === 'stickers' && <StickersTab guildId={guild.id} />}
+        {tab === 'commands' && <CommandsTab guildId={guild.id} />}
       </div>
     </div>
   );
@@ -85,12 +89,73 @@ function TabBtn({
 
 function OverviewTab({ guildId }: { guildId: string }) {
   const guild = useAppSelector((s) => s.guilds.list.find((g) => g.id === guildId));
+  const [uploading, setUploading] = useState(false);
+
+  async function uploadIcon(file: File) {
+    if (!guild) return;
+    setUploading(true);
+    try {
+      const presign = await api.uploads.presign({
+        filename: file.name,
+        content_type: file.type || 'image/png',
+        size_bytes: file.size,
+      });
+      await fetch(presign.upload_url, {
+        method: 'PUT',
+        body: file,
+        headers: file.type ? { 'Content-Type': file.type } : undefined,
+      });
+      await fetch(`/api/v1/guilds/${guild.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + localStorage.getItem('sidcord_access'),
+        },
+        body: JSON.stringify({ icon_url_v2: presign.public_url }),
+      });
+      location.reload();
+    } finally {
+      setUploading(false);
+    }
+  }
+
   if (!guild) return null;
+  const iconUrl = (guild as any).icon_url_v2 as string | undefined;
   return (
     <div>
       <h2 className="text-2xl font-bold text-ink-primary mb-4">Genel Bilgi</h2>
-      <div className="bg-surface-2 rounded-xl border border-line p-4 space-y-2 text-sm">
-        <Row label="Sunucu Adı" value={guild.name} />
+      <div className="bg-surface-2 rounded-xl border border-line p-4 space-y-4">
+        <div className="flex items-center gap-4">
+          <label
+            className={
+              'w-16 h-16 rounded-2xl flex items-center justify-center text-white text-xl font-bold overflow-hidden cursor-pointer ring-2 ring-transparent hover:ring-brand-500 transition-all relative ' +
+              (uploading ? 'opacity-50' : '')
+            }
+            style={{ backgroundColor: guild.icon_color }}
+          >
+            {iconUrl ? (
+              <img src={iconUrl} alt="" className="w-full h-full object-cover" />
+            ) : (
+              guild.icon_text
+            )}
+            <input
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) uploadIcon(f);
+              }}
+            />
+            <span className="absolute inset-0 bg-black/40 opacity-0 hover:opacity-100 text-[10px] flex items-center justify-center font-normal">
+              Değiştir
+            </span>
+          </label>
+          <div>
+            <div className="text-base font-semibold text-ink-primary">{guild.name}</div>
+            <div className="text-xs text-ink-tertiary">İkona tıkla → resim seç</div>
+          </div>
+        </div>
         <Row label="Sunucu ID" value={guild.id} mono />
         <Row label="Oluşturulma" value={new Date(guild.created_at).toLocaleString('tr-TR')} />
       </div>
@@ -1016,6 +1081,105 @@ function StickersTab({ guildId }: { guildId: string }) {
             </div>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+function CommandsTab({ guildId }: { guildId: string }) {
+  const [list, setList] = useState<Awaited<ReturnType<typeof api.commands.list>>>([]);
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [response, setResponse] = useState('');
+
+  async function refresh() {
+    setList(await api.commands.list(guildId).catch(() => []));
+  }
+  useEffect(() => {
+    refresh();
+  }, [guildId]);
+
+  async function submit() {
+    try {
+      await api.commands.create(guildId, { name, description, response });
+      setName('');
+      setDescription('');
+      setResponse('');
+      refresh();
+    } catch (e) {
+      console.warn(e);
+    }
+  }
+
+  return (
+    <div>
+      <h2 className="text-2xl font-bold text-ink-primary mb-4">Slash Komutları</h2>
+      <p className="text-sm text-ink-secondary mb-4">
+        Bir kanalda <span className="font-mono text-ink-primary">/komut</span> yazıldığında otomatik yanıt verir.
+      </p>
+      <div className="bg-surface-2 border border-line rounded-xl p-4 mb-4 space-y-2">
+        <div className="flex gap-2">
+          <span className="text-ink-tertiary text-sm py-2">/</span>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+            placeholder="kurallar"
+            maxLength={32}
+            className="flex-1 bg-surface-1 border border-line rounded-lg px-3 py-2 text-ink-primary font-mono focus:border-brand-500/50 focus:outline-none"
+          />
+        </div>
+        <input
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Kısa açıklama (en fazla 100 karakter)"
+          maxLength={100}
+          className="w-full bg-surface-1 border border-line rounded-lg px-3 py-2 text-ink-primary focus:border-brand-500/50 focus:outline-none"
+        />
+        <textarea
+          value={response}
+          onChange={(e) => setResponse(e.target.value)}
+          placeholder="Komut çalışınca kanala yazılacak yanıt (markdown destekler)"
+          rows={3}
+          className="w-full bg-surface-1 border border-line rounded-lg px-3 py-2 text-ink-primary focus:border-brand-500/50 focus:outline-none resize-none"
+        />
+        <button
+          onClick={submit}
+          disabled={!name.trim() || !description.trim() || !response.trim()}
+          className="w-full py-2 rounded-lg bg-brand-500 hover:bg-brand-400 disabled:bg-surface-3 text-white font-semibold"
+        >
+          Komutu Ekle
+        </button>
+      </div>
+
+      {list.length === 0 ? (
+        <p className="text-ink-tertiary text-sm">Henüz komut yok.</p>
+      ) : (
+        <ul className="space-y-2">
+          {list.map((c) => (
+            <li
+              key={c.id}
+              className="bg-surface-2 border border-line rounded-xl p-3 flex items-start gap-3"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="font-mono text-sm text-brand-500">/{c.name}</div>
+                <div className="text-xs text-ink-secondary mt-0.5">{c.description}</div>
+                <div className="text-xs text-ink-tertiary mt-1 truncate whitespace-pre-wrap">
+                  → {c.response}
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  if (confirm(`/${c.name} komutunu sil?`)) {
+                    api.commands.delete(c.id).then(refresh);
+                  }
+                }}
+                className="text-ink-tertiary hover:text-accent-500"
+              >
+                <Trash2 size={14} />
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

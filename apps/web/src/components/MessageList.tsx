@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Hash, Smile, Pencil, Trash2, Check, X, Pin, MessagesSquare, Reply } from 'lucide-react';
+import { Hash, Smile, Pencil, Trash2, Check, X, Pin, MessagesSquare, Reply, Share2 } from 'lucide-react';
 import {
   useAppDispatch,
   useAppSelector,
@@ -102,6 +102,7 @@ export function MessageList() {
       )}
 
       <TypingIndicator />
+      <UnreadDivider list={list} />
       <ul className="space-y-3">
         {list.map((m, i) => {
           const prev = list[i - 1];
@@ -127,6 +128,26 @@ export function MessageList() {
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+function UnreadDivider({ list }: { list: any[] }) {
+  const channelId = useAppSelector((s) => s.channels.selectedId);
+  const readState = useAppSelector((s) =>
+    channelId ? s.readStates.byChannel[channelId] : null,
+  );
+  if (!readState?.last_message_id) return null;
+  const firstUnreadIdx = list.findIndex((m) => m.id > readState.last_message_id!);
+  if (firstUnreadIdx <= 0) return null;
+  const m = list[firstUnreadIdx];
+  return (
+    <div className="flex items-center gap-2 my-3" data-message-id={m.id}>
+      <div className="flex-1 h-px bg-accent-500/60" />
+      <span className="text-[10px] font-bold text-accent-500 uppercase tracking-wider">
+        Yeni mesajlar
+      </span>
+      <div className="flex-1 h-px bg-accent-500/60" />
     </div>
   );
 }
@@ -235,6 +256,22 @@ function MessageItem({
     } catch (e) {
       console.error('delete', e);
     }
+  }
+
+  async function forwardMessage() {
+    const channels = (window as any).__sidcord_channels as
+      | { id: string; name: string; type: string; guild_id?: string }[]
+      | undefined;
+    const target = prompt('Hangi kanala iletmek istiyorsun? (kanal ID gir)');
+    if (!target) return;
+    try {
+      await api.channels.sendMessage(target, content || ' ', undefined, {
+        forwarded_from_message_id: messageId,
+      });
+    } catch (e) {
+      console.warn('forward', e);
+    }
+    void channels;
   }
 
   async function startThread() {
@@ -378,6 +415,7 @@ function MessageItem({
             ))}
           </div>
         )}
+        <EmbedsView messageId={messageId} content={content} />
         {reactions.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1.5">
             {reactions.map((r: APIReaction) => (
@@ -427,6 +465,13 @@ function MessageItem({
           title="Thread Başlat"
         >
           <MessagesSquare size={14} />
+        </button>
+        <button
+          onClick={forwardMessage}
+          className="hover:bg-surface-3 w-7 h-7 flex items-center justify-center text-ink-secondary hover:text-brand-500 rounded"
+          title="İlet"
+        >
+          <Share2 size={14} />
         </button>
         {isMine && (
           <button
@@ -523,3 +568,58 @@ function formatFull(ts: number) {
   });
 }
 
+
+function EmbedsView({ messageId, content }: { messageId: string; content: string }) {
+  const [embeds, setEmbeds] = useState<Awaited<ReturnType<typeof api.embeds.forMessage>>>([]);
+
+  useEffect(() => {
+    if (!/https?:\/\//.test(content)) {
+      setEmbeds([]);
+      return;
+    }
+    // Mesaj geldikten birkaç saniye sonra embed'ler hazır olabilir (backend asenkron parse eder)
+    let attempts = 0;
+    const tick = async () => {
+      try {
+        const list = await api.embeds.forMessage(messageId);
+        setEmbeds(list);
+        if (list.length === 0 && attempts++ < 3) {
+          setTimeout(tick, 2000);
+        }
+      } catch {}
+    };
+    tick();
+  }, [messageId, content]);
+
+  if (embeds.length === 0) return null;
+  return (
+    <div className="mt-2 space-y-2">
+      {embeds.map((e) => (
+        <a
+          key={e.id}
+          href={e.url}
+          target="_blank"
+          rel="noreferrer"
+          className="block max-w-md bg-surface-2 hover:bg-surface-3 border-l-4 border-brand-500 border-y border-r border-line rounded-r-lg p-3 transition-colors"
+        >
+          {e.site_name && (
+            <div className="text-[10px] uppercase font-semibold text-ink-tertiary tracking-wider mb-0.5">
+              {e.site_name}
+            </div>
+          )}
+          {e.title && <div className="font-semibold text-brand-500 text-sm">{e.title}</div>}
+          {e.description && (
+            <div className="text-xs text-ink-secondary mt-1 line-clamp-3">{e.description}</div>
+          )}
+          {e.image_url && (
+            <img
+              src={e.image_url}
+              alt=""
+              className="mt-2 rounded max-h-48 object-cover"
+            />
+          )}
+        </a>
+      ))}
+    </div>
+  );
+}

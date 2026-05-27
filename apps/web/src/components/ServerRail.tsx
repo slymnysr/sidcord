@@ -123,14 +123,18 @@ function GuildIcon({ guild, active }: { guild: APIGuild; active: boolean }) {
         onClick={() => dispatch(switchToGuild(guild.id))}
         title={guild.name}
         className={clsx(
-          'relative w-12 h-12 rounded-xl flex items-center justify-center font-bold text-white text-[15px] tracking-tight transition-all duration-200',
+          'relative w-12 h-12 rounded-xl flex items-center justify-center font-bold text-white text-[15px] tracking-tight transition-all duration-200 overflow-hidden',
           active
             ? 'ring-2 ring-brand-500 ring-offset-2 ring-offset-bg shadow-glow scale-105'
             : 'opacity-85 hover:opacity-100 hover:scale-105',
         )}
         style={{ backgroundColor: guild.icon_color }}
       >
-        {guild.icon_text}
+        {(guild as any).icon_url_v2 ? (
+          <img src={(guild as any).icon_url_v2} alt="" className="absolute inset-0 w-full h-full object-cover" />
+        ) : (
+          guild.icon_text
+        )}
         {active && (
           <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-brand-500" />
         )}

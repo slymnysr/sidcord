@@ -15,9 +15,10 @@ import (
 )
 
 type createMessageReq struct {
-	Content     string                  `json:"content"`
-	RepliedToID string                  `json:"replied_to_id,omitempty"`
-	Attachments []createAttachmentInput `json:"attachments,omitempty"`
+	Content                string                  `json:"content"`
+	RepliedToID            string                  `json:"replied_to_id,omitempty"`
+	Attachments            []createAttachmentInput `json:"attachments,omitempty"`
+	ForwardedFromMessageID string                  `json:"forwarded_from_message_id,omitempty"`
 }
 
 type createAttachmentInput struct {
@@ -142,6 +143,20 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "mesaj kaydedilemedi")
 		return
 	}
+	// Mesaj forward: orijinal mesaj ID'sini ve kanalını set et
+	if req.ForwardedFromMessageID != "" {
+		if fid, perr := strconv.ParseInt(req.ForwardedFromMessageID, 10, 64); perr == nil {
+			var fromChannel int64
+			if h.Pool.QueryRow(r.Context(), `SELECT channel_id FROM messages WHERE id = $1`, fid).Scan(&fromChannel) == nil {
+				_, _ = h.Pool.Exec(r.Context(), `
+                    UPDATE messages SET forwarded_from_message_id = $1, forwarded_from_channel_id = $2 WHERE id = $3
+                `, fid, fromChannel, m.ID)
+			}
+		}
+	}
+	// Mesajda URL varsa link embed parse et (asenkron — basit OG meta fetcher)
+	go h.parseAndStoreEmbeds(m.ID, req.Content)
+
 	// Kanalın last_message_id'sini güncelle (unread badge için)
 	_, _ = h.Pool.Exec(r.Context(), `UPDATE channels SET last_message_id = $1 WHERE id = $2`, m.ID, channelID)
 

@@ -589,6 +589,63 @@ export const api = {
     remove: (userId: string) => request<void>(`/friends/${userId}`, { method: 'DELETE' }),
   },
 
+  commands: {
+    list: (guildId: string) =>
+      request<
+        Array<{
+          id: Snowflake;
+          guild_id: Snowflake;
+          name: string;
+          description: string;
+          response: string;
+          creator_id: Snowflake;
+          created_at: string;
+        }>
+      >(`/guilds/${guildId}/commands`),
+    create: (guildId: string, input: { name: string; description: string; response: string }) =>
+      request<{ id: Snowflake }>(`/guilds/${guildId}/commands`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    delete: (commandId: string) =>
+      request<void>(`/commands/${commandId}`, { method: 'DELETE' }),
+    run: (channelId: string, name: string) =>
+      request<APIMessage>(`/channels/${channelId}/commands/run?name=${encodeURIComponent(name)}`, {
+        method: 'POST',
+      }),
+  },
+
+  folders: {
+    list: () =>
+      request<
+        Array<{ id: Snowflake; name: string; color: number; position: number; guild_ids: Snowflake[] }>
+      >('/users/me/folders'),
+    create: (input: { name: string; color?: number; guild_ids?: string[] }) =>
+      request<{ id: Snowflake }>('/users/me/folders', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    update: (folderId: string, input: { name?: string; color?: number; guild_ids?: string[] }) =>
+      request<void>(`/folders/${folderId}`, { method: 'PATCH', body: JSON.stringify(input) }),
+    delete: (folderId: string) =>
+      request<void>(`/folders/${folderId}`, { method: 'DELETE' }),
+  },
+
+  embeds: {
+    forMessage: (messageId: string) =>
+      request<
+        Array<{
+          id: Snowflake;
+          url: string;
+          title?: string;
+          description?: string;
+          image_url?: string;
+          site_name?: string;
+          embed_type: 'link' | 'image' | 'video' | 'article';
+        }>
+      >(`/messages/${messageId}/embeds`),
+  },
+
   emojis: {
     list: (guildId: string) =>
       request<
@@ -691,10 +748,11 @@ export const api = {
       channelId: string,
       content: string,
       attachments?: { url: string; filename: string; content_type: string; size_bytes: number }[],
+      opts?: { replied_to_id?: string; forwarded_from_message_id?: string },
     ) =>
       request<APIMessage>(`/channels/${channelId}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ content, attachments }),
+        body: JSON.stringify({ content, attachments, ...opts }),
       }),
   },
 };

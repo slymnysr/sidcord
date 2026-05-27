@@ -115,6 +115,18 @@ export function MessageInput() {
     if (!channelId) return;
     if (files.some((f) => f.uploading)) return; // bekle
 
+    // Slash command algıla: /komut formatı
+    const slashMatch = v.match(/^\/([a-z0-9_-]+)\s*$/i);
+    if (slashMatch) {
+      try {
+        await api.commands.run(channelId, slashMatch[1]);
+        setValue('');
+        return;
+      } catch (e: any) {
+        // 404 → tanımlı değil, normal mesaj olarak devam et
+      }
+    }
+
     setSending(true);
     const okFiles = files.filter((f) => f.publicUrl);
     setValue('');

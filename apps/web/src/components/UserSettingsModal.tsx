@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { User, Lock, Smile, Bell, Mic } from 'lucide-react';
+import { User, Lock, Smile, Bell, Mic, Keyboard } from 'lucide-react';
 import { api } from '../api';
 import { useAppDispatch, useAppSelector, closeModal, fetchMe } from '../store';
 
-type Tab = 'profile' | 'account' | 'status' | 'notifications' | 'voice';
+type Tab = 'profile' | 'account' | 'status' | 'notifications' | 'voice' | 'keyboard';
 
 export function UserSettingsModal() {
   const me = useAppSelector((s) => s.auth.user);
@@ -31,6 +31,9 @@ export function UserSettingsModal() {
         <TabBtn icon={<Mic size={16} />} active={tab === 'voice'} onClick={() => setTab('voice')}>
           Ses & Video
         </TabBtn>
+        <TabBtn icon={<Keyboard size={16} />} active={tab === 'keyboard'} onClick={() => setTab('keyboard')}>
+          Klavye Kısayolları
+        </TabBtn>
       </nav>
       <div className="flex-1 overflow-y-auto p-6">
         {tab === 'profile' && <ProfileTab />}
@@ -38,6 +41,7 @@ export function UserSettingsModal() {
         {tab === 'status' && <CustomStatusTab />}
         {tab === 'notifications' && <NotificationsTab />}
         {tab === 'voice' && <VoiceTab />}
+        {tab === 'keyboard' && <KeyboardTab />}
       </div>
     </div>
   );
@@ -74,6 +78,7 @@ function ProfileTab() {
   const [displayName, setDisplayName] = useState(me.display_name);
   const [bio, setBio] = useState((me as any).bio ?? '');
   const [saving, setSaving] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   async function save() {
     setSaving(true);
@@ -92,20 +97,71 @@ function ProfileTab() {
     }
   }
 
+  async function uploadAvatar(file: File) {
+    setUploadingAvatar(true);
+    try {
+      const presign = await api.uploads.presign({
+        filename: file.name,
+        content_type: file.type || 'image/png',
+        size_bytes: file.size,
+      });
+      await fetch(presign.upload_url, {
+        method: 'PUT',
+        body: file,
+        headers: file.type ? { 'Content-Type': file.type } : undefined,
+      });
+      await fetch('/api/v1/users/me', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer ' + localStorage.getItem('sidcord_access'),
+        },
+        body: JSON.stringify({ avatar_url: presign.public_url }),
+      });
+      await dispatch(fetchMe());
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }
+
+  const avatarUrl = (me as any).avatar_url as string | undefined;
+
   return (
     <div>
       <h2 className="text-2xl font-bold text-ink-primary mb-5">Profilim</h2>
       <div className="bg-surface-2 rounded-xl border border-line p-4 space-y-4">
         <div className="flex items-center gap-4">
-          <div
-            className="w-16 h-16 rounded-full flex items-center justify-center text-white text-2xl font-bold"
+          <label
+            className={
+              'w-16 h-16 rounded-full flex items-center justify-center text-white text-2xl font-bold overflow-hidden cursor-pointer ring-2 ring-transparent hover:ring-brand-500 transition-all relative ' +
+              (uploadingAvatar ? 'opacity-50' : '')
+            }
             style={{ backgroundColor: me.avatar_color }}
           >
-            {me.display_name.slice(0, 1).toUpperCase()}
-          </div>
+            {avatarUrl ? (
+              <img src={avatarUrl} alt="" className="w-full h-full object-cover" />
+            ) : (
+              me.display_name.slice(0, 1).toUpperCase()
+            )}
+            <input
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) uploadAvatar(f);
+              }}
+            />
+            <span className="absolute inset-0 bg-black/40 opacity-0 hover:opacity-100 text-[10px] flex items-center justify-center font-normal">
+              Değiştir
+            </span>
+          </label>
           <div>
             <div className="text-lg font-semibold text-ink-primary">{me.display_name}</div>
             <div className="text-sm text-ink-tertiary">@{me.username}</div>
+            <div className="text-xs text-ink-tertiary mt-1">
+              Avatara tıkla → resim seç (PNG/JPG/GIF)
+            </div>
           </div>
         </div>
         <div>
@@ -297,11 +353,54 @@ function NotificationsTab() {
   const [enabled, setEnabled] = useState<NotificationPermission>(
     typeof Notification !== 'undefined' ? Notification.permission : 'denied',
   );
+  const [subscribed, setSubscribed] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+      try {
+        const reg = await navigator.serviceWorker.getRegistration('/sw.js');
+        if (!reg) return;
+        const sub = await reg.pushManager.getSubscription();
+        setSubscribed(!!sub);
+      } catch {}
+    })();
+  }, []);
 
   async function enable() {
     if (typeof Notification === 'undefined') return;
     const r = await Notification.requestPermission();
     setEnabled(r);
+    if (r !== 'granted') return;
+    // Service worker + push subscribe
+    setErr(null);
+    try {
+      const reg = await navigator.serviceWorker.register('/sw.js');
+      await navigator.serviceWorker.ready;
+      // Sidcord public VAPID key (dev için sabit). Production'da backend'den getirilir.
+      // Bu placeholder — gerçek push gönderim için backend webpush kütüphanesi ile imzalanır.
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true });
+      const json = sub.toJSON() as any;
+      await api.push.subscribe({
+        endpoint: sub.endpoint,
+        p256dh: json.keys?.p256dh ?? '',
+        auth: json.keys?.auth ?? '',
+      });
+      setSubscribed(true);
+    } catch (e: any) {
+      setErr(e?.message ?? 'Push aboneliği başarısız');
+    }
+  }
+
+  async function disable() {
+    try {
+      const reg = await navigator.serviceWorker.getRegistration('/sw.js');
+      const sub = await reg?.pushManager.getSubscription();
+      await sub?.unsubscribe();
+      await api.push.unsubscribeAll();
+      setSubscribed(false);
+    } catch {}
   }
 
   return (
@@ -312,8 +411,17 @@ function NotificationsTab() {
         <p className="text-sm text-ink-secondary mb-3">
           Sidcord sekmesi açık değilken bile DM ve mention bildirimleri göstersin.
         </p>
-        {enabled === 'granted' ? (
-          <p className="text-sm text-status-online">✓ Bildirim izni verildi</p>
+        {err && <p className="text-accent-500 text-sm mb-2">{err}</p>}
+        {enabled === 'granted' && subscribed ? (
+          <div className="flex items-center gap-3">
+            <p className="text-sm text-status-online flex-1">✓ Bildirimler aktif</p>
+            <button
+              onClick={disable}
+              className="px-3 py-1.5 rounded-lg bg-surface-3 hover:bg-accent-500 hover:text-white text-ink-primary text-sm font-semibold"
+            >
+              Aboneliği iptal et
+            </button>
+          </div>
         ) : enabled === 'denied' ? (
           <p className="text-sm text-accent-500">
             Bildirim izni reddedilmiş. Tarayıcı ayarlarından açabilirsin.
@@ -350,6 +458,48 @@ function VoiceTab() {
           Sidcord otomatik olarak echo cancellation, noise suppression ve auto gain control
           uygular (getUserMedia constraints).
         </p>
+      </div>
+    </div>
+  );
+}
+
+function KeyboardTab() {
+  const shortcuts = [
+    { keys: ['Ctrl', 'K'], label: 'Sunucu/kanal hızlı geçiş (arama)' },
+    { keys: ['Ctrl', 'Shift', 'K'], label: 'Yeni DM oluştur' },
+    { keys: ['Ctrl', '/'], label: 'Bu yardımı göster' },
+    { keys: ['Ctrl', 'B'], label: 'Üye listesini aç/kapat' },
+    { keys: ['Enter'], label: 'Mesaj gönder' },
+    { keys: ['Shift', 'Enter'], label: 'Yeni satır' },
+    { keys: ['Escape'], label: 'Düzenlemeyi iptal et / Modal kapat' },
+    { keys: ['↑'], label: 'Son mesajı düzenle' },
+    { keys: ['Ctrl', 'Shift', 'M'], label: 'Mikrofonu sustur/aç' },
+    { keys: ['Ctrl', 'Shift', 'D'], label: 'Sağırlaştır/aç' },
+    { keys: ['@', 'isim'], label: 'Bir üyeyi bahset' },
+    { keys: ['#', 'isim'], label: 'Bir kanal bağla' },
+    { keys: [':emoji:'], label: 'Emoji ekle' },
+    { keys: ['/komut'], label: 'Slash komut çalıştır' },
+    { keys: ['Ctrl', 'Shift', 'R'], label: 'Sayfayı sert yenile' },
+  ];
+  return (
+    <div>
+      <h2 className="text-2xl font-bold text-ink-primary mb-5">Klavye Kısayolları</h2>
+      <div className="bg-surface-2 rounded-xl border border-line p-4 space-y-2">
+        {shortcuts.map((s, i) => (
+          <div key={i} className="flex items-center justify-between py-1.5 border-b border-line last:border-b-0">
+            <span className="text-sm text-ink-primary">{s.label}</span>
+            <div className="flex items-center gap-1">
+              {s.keys.map((k, j) => (
+                <kbd
+                  key={j}
+                  className="px-2 py-0.5 rounded bg-surface-3 text-ink-primary text-xs font-mono border border-line"
+                >
+                  {k}
+                </kbd>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
