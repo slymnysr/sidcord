@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { User, Lock, Smile, Bell, Mic, Keyboard } from 'lucide-react';
+import { User, Lock, Smile, Bell, Mic, Keyboard, Palette } from 'lucide-react';
 import { api } from '../api';
 import { useAppDispatch, useAppSelector, closeModal, fetchMe } from '../store';
 
-type Tab = 'profile' | 'account' | 'status' | 'notifications' | 'voice' | 'keyboard';
+type Tab = 'profile' | 'account' | 'status' | 'notifications' | 'voice' | 'appearance' | 'keyboard';
 
 export function UserSettingsModal() {
   const me = useAppSelector((s) => s.auth.user);
@@ -31,6 +31,9 @@ export function UserSettingsModal() {
         <TabBtn icon={<Mic size={16} />} active={tab === 'voice'} onClick={() => setTab('voice')}>
           Ses & Video
         </TabBtn>
+        <TabBtn icon={<Palette size={16} />} active={tab === 'appearance'} onClick={() => setTab('appearance')}>
+          Görünüm
+        </TabBtn>
         <TabBtn icon={<Keyboard size={16} />} active={tab === 'keyboard'} onClick={() => setTab('keyboard')}>
           Klavye Kısayolları
         </TabBtn>
@@ -41,6 +44,7 @@ export function UserSettingsModal() {
         {tab === 'status' && <CustomStatusTab />}
         {tab === 'notifications' && <NotificationsTab />}
         {tab === 'voice' && <VoiceTab />}
+        {tab === 'appearance' && <AppearanceTab />}
         {tab === 'keyboard' && <KeyboardTab />}
       </div>
     </div>
@@ -588,6 +592,95 @@ function VoiceTab() {
         Sidcord otomatik olarak echo cancellation, noise suppression ve auto gain control uygular
         (getUserMedia constraints).
       </p>
+    </div>
+  );
+}
+
+function AppearanceTab() {
+  const [density, setDensity] = useState(localStorage.getItem('sidcord_density') ?? 'cozy');
+  const [theme, setTheme] = useState(localStorage.getItem('sidcord_theme') ?? 'dark');
+
+  function applyDensity(v: string) {
+    setDensity(v);
+    localStorage.setItem('sidcord_density', v);
+    document.documentElement.dataset.density = v;
+  }
+  function applyTheme(v: string) {
+    setTheme(v);
+    localStorage.setItem('sidcord_theme', v);
+    document.documentElement.dataset.theme = v;
+  }
+  useEffect(() => {
+    document.documentElement.dataset.density = density;
+    document.documentElement.dataset.theme = theme;
+  }, [density, theme]);
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-2xl font-bold text-ink-primary mb-5">Görünüm</h2>
+
+      <div className="bg-surface-2 rounded-xl border border-line p-4">
+        <h3 className="text-sm font-bold text-ink-primary mb-2">Mesaj Yoğunluğu</h3>
+        <p className="text-xs text-ink-secondary mb-3">
+          Mesajlar arası boşluğu ve avatar boyutunu değiştirir.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            onClick={() => applyDensity('cozy')}
+            className={
+              'p-4 rounded-xl border-2 text-left transition-all ' +
+              (density === 'cozy'
+                ? 'border-brand-500 bg-brand-500/5'
+                : 'border-line bg-surface-1 hover:border-brand-500/40')
+            }
+          >
+            <div className="font-semibold text-ink-primary mb-1">Rahat (Cozy)</div>
+            <div className="text-xs text-ink-tertiary">Geniş aralık, büyük avatarlar</div>
+          </button>
+          <button
+            onClick={() => applyDensity('compact')}
+            className={
+              'p-4 rounded-xl border-2 text-left transition-all ' +
+              (density === 'compact'
+                ? 'border-brand-500 bg-brand-500/5'
+                : 'border-line bg-surface-1 hover:border-brand-500/40')
+            }
+          >
+            <div className="font-semibold text-ink-primary mb-1">Yoğun (Compact)</div>
+            <div className="text-xs text-ink-tertiary">Dar satırlar, IRC tarzı</div>
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-surface-2 rounded-xl border border-line p-4">
+        <h3 className="text-sm font-bold text-ink-primary mb-2">Tema</h3>
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            onClick={() => applyTheme('dark')}
+            className={
+              'p-4 rounded-xl border-2 text-left transition-all ' +
+              (theme === 'dark'
+                ? 'border-brand-500 bg-brand-500/5'
+                : 'border-line bg-surface-1 hover:border-brand-500/40')
+            }
+          >
+            <div className="font-semibold text-ink-primary mb-1">🌙 Koyu</div>
+            <div className="text-xs text-ink-tertiary">Varsayılan Sidcord</div>
+          </button>
+          <button
+            onClick={() => applyTheme('amoled')}
+            className={
+              'p-4 rounded-xl border-2 text-left transition-all ' +
+              (theme === 'amoled'
+                ? 'border-brand-500 bg-brand-500/5'
+                : 'border-line bg-surface-1 hover:border-brand-500/40')
+            }
+          >
+            <div className="font-semibold text-ink-primary mb-1">⚫ AMOLED</div>
+            <div className="text-xs text-ink-tertiary">Tam siyah arka plan</div>
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

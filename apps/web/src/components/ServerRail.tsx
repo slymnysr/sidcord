@@ -1,8 +1,16 @@
 import { useState, useRef, useEffect } from 'react';
 import clsx from 'clsx';
-import { Plus, Compass } from 'lucide-react';
+import { Plus, Compass, Folder } from 'lucide-react';
 import { useAppDispatch, useAppSelector, openModal, switchToDM, switchToGuild } from '../store';
-import type { APIGuild } from '../api';
+import { api, type APIGuild } from '../api';
+
+interface FolderView {
+  id: string;
+  name: string;
+  color: number;
+  position: number;
+  guild_ids: string[];
+}
 
 export function ServerRail() {
   const guilds = useAppSelector((s) => s.guilds.list);
@@ -12,6 +20,16 @@ export function ServerRail() {
 
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [folders, setFolders] = useState<FolderView[]>([]);
+
+  async function refreshFolders() {
+    try {
+      setFolders((await api.folders.list()) as FolderView[]);
+    } catch {}
+  }
+  useEffect(() => {
+    refreshFolders();
+  }, []);
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
@@ -43,36 +61,78 @@ export function ServerRail() {
             Henüz sunucun yok
           </p>
         )}
-        {guilds.map((g, idx) => (
-          <div
-            key={g.id}
-            draggable
-            onDragStart={(e) => {
-              e.dataTransfer.setData('text/sidcord-guild', g.id);
-              e.dataTransfer.effectAllowed = 'move';
+
+        {/* Klasörler */}
+        {folders.map((f) => (
+          <FolderView
+            key={f.id}
+            folder={f}
+            guilds={guilds.filter((g) => f.guild_ids.includes(g.id))}
+            selectedId={selectedId}
+            mode={mode}
+            onDropToFolder={async (guildId) => {
+              if (f.guild_ids.includes(guildId)) return;
+              await api.folders.update(f.id, {
+                guild_ids: [...f.guild_ids, guildId],
+              });
+              refreshFolders();
             }}
-            onDragOver={(e) => {
-              if (e.dataTransfer.types.includes('text/sidcord-guild')) e.preventDefault();
+            onRemove={async () => {
+              if (!confirm(`"${f.name}" klasörünü sil?`)) return;
+              await api.folders.delete(f.id);
+              refreshFolders();
             }}
-            onDrop={(e) => {
-              e.preventDefault();
-              const draggedId = e.dataTransfer.getData('text/sidcord-guild');
-              if (!draggedId || draggedId === g.id) return;
-              // Sıralamayı localStorage'da tut (backend folder yapısı ile ayrı)
-              try {
-                const order = JSON.parse(localStorage.getItem('sidcord_guild_order') ?? '[]') as string[];
-                const filtered = order.filter((id) => id !== draggedId && guilds.some((x) => x.id === id));
-                const targetIdx = filtered.indexOf(g.id);
-                const insertAt = targetIdx >= 0 ? targetIdx : idx;
-                filtered.splice(insertAt, 0, draggedId);
-                localStorage.setItem('sidcord_guild_order', JSON.stringify(filtered));
-                location.reload();
-              } catch {}
-            }}
-          >
-            <GuildIcon guild={g} active={g.id === selectedId && mode === 'guild'} />
-          </div>
+          />
         ))}
+
+        {/* Klasörsüz sunucular */}
+        {guilds
+          .filter((g) => !folders.some((f) => f.guild_ids.includes(g.id)))
+          .map((g, idx) => (
+            <div
+              key={g.id}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData('text/sidcord-guild', g.id);
+                e.dataTransfer.effectAllowed = 'move';
+              }}
+              onDragOver={(e) => {
+                if (e.dataTransfer.types.includes('text/sidcord-guild')) e.preventDefault();
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                const draggedId = e.dataTransfer.getData('text/sidcord-guild');
+                if (!draggedId || draggedId === g.id) return;
+                try {
+                  const order = JSON.parse(localStorage.getItem('sidcord_guild_order') ?? '[]') as string[];
+                  const filtered = order.filter((id) => id !== draggedId && guilds.some((x) => x.id === id));
+                  const targetIdx = filtered.indexOf(g.id);
+                  const insertAt = targetIdx >= 0 ? targetIdx : idx;
+                  filtered.splice(insertAt, 0, draggedId);
+                  localStorage.setItem('sidcord_guild_order', JSON.stringify(filtered));
+                  location.reload();
+                } catch {}
+              }}
+            >
+              <GuildIcon guild={g} active={g.id === selectedId && mode === 'guild'} />
+            </div>
+          ))}
+
+        {/* Yeni klasör oluştur */}
+        {guilds.length > 0 && (
+          <button
+            onClick={async () => {
+              const name = prompt('Klasör adı?');
+              if (!name?.trim()) return;
+              await api.folders.create({ name: name.trim() });
+              refreshFolders();
+            }}
+            title="Yeni Klasör"
+            className="w-12 h-12 rounded-xl bg-surface-1 border border-dashed border-line hover:border-brand-500/40 text-ink-tertiary hover:text-brand-500 flex items-center justify-center transition-colors"
+          >
+            <Folder size={18} />
+          </button>
+        )}
       </div>
 
       <div className="flex flex-col gap-2 items-center relative" ref={menuRef}>
@@ -254,6 +314,67 @@ function GuildContextMenu({
           Sunucudan Ayrıl
         </button>
       </div>
+    </div>
+  );
+}
+
+function FolderView({
+  folder,
+  guilds,
+  selectedId,
+  mode,
+  onDropToFolder,
+  onRemove,
+}: {
+  folder: FolderView;
+  guilds: APIGuild[];
+  selectedId: string | null;
+  mode: 'guild' | 'dm';
+  onDropToFolder: (guildId: string) => void;
+  onRemove: () => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const [over, setOver] = useState(false);
+  const color = '#' + folder.color.toString(16).padStart(6, '0');
+
+  return (
+    <div className="w-full flex flex-col items-center gap-2.5">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onRemove();
+        }}
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes('text/sidcord-guild')) {
+            e.preventDefault();
+            setOver(true);
+          }
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setOver(false);
+          const id = e.dataTransfer.getData('text/sidcord-guild');
+          if (id) onDropToFolder(id);
+        }}
+        title={folder.name + ' (sağ tık ile sil)'}
+        className={clsx(
+          'w-12 h-12 rounded-2xl flex items-center justify-center transition-all',
+          open ? 'rounded-2xl' : '',
+          over ? 'scale-110 ring-2 ring-brand-500' : '',
+        )}
+        style={{ backgroundColor: color + '30' }}
+      >
+        <Folder size={20} style={{ color }} />
+      </button>
+      {open && (
+        <div className="flex flex-col gap-2.5">
+          {guilds.map((g) => (
+            <GuildIcon key={g.id} guild={g} active={g.id === selectedId && mode === 'guild'} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Paperclip, Send, X, FileIcon, Smile, AtSign, Sticker } from 'lucide-react';
+import { Paperclip, Send, X, FileIcon, Smile, AtSign, Sticker, Mic, Square } from 'lucide-react';
 import { api } from '../api';
 import { useAppDispatch, useAppSelector, setReplyTo } from '../store';
 import { sendTyping } from '../gateway';
@@ -34,6 +34,10 @@ export function MessageInput() {
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [stickerOpen, setStickerOpen] = useState(false);
   const [stickers, setStickers] = useState<Awaited<ReturnType<typeof api.stickers.list>>>([]);
+  const [recording, setRecording] = useState(false);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recordingStartRef = useRef<number>(0);
+  const [recordingDur, setRecordingDur] = useState(0);
   const [mention, setMention] = useState<{ type: '@' | '#' | ':' | '/'; q: string; start: number } | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -202,6 +206,59 @@ export function MessageInput() {
     } else {
       setMention(null);
     }
+  }
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      const chunks: Blob[] = [];
+      rec.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+      rec.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        if (blob.size < 1000) return; // çok kısa
+        const file = new File([blob], `voice-${Date.now()}.webm`, { type: 'audio/webm' });
+        const pending = await uploadFile(file);
+        if (pending.publicUrl && channelId) {
+          await api.channels.sendMessage(
+            channelId,
+            ' ',
+            [
+              {
+                url: pending.publicUrl,
+                filename: file.name,
+                content_type: file.type,
+                size_bytes: file.size,
+              },
+            ],
+          );
+          setFiles((fs) => fs.filter((f) => f.id !== pending.id));
+        }
+      };
+      rec.start();
+      recorderRef.current = rec;
+      recordingStartRef.current = Date.now();
+      setRecording(true);
+      const interval = setInterval(() => {
+        if (!recorderRef.current) {
+          clearInterval(interval);
+          return;
+        }
+        setRecordingDur(Math.floor((Date.now() - recordingStartRef.current) / 1000));
+      }, 500);
+    } catch (e) {
+      console.warn('recording error', e);
+    }
+  }
+
+  function stopRecording() {
+    recorderRef.current?.stop();
+    recorderRef.current = null;
+    setRecording(false);
+    setRecordingDur(0);
   }
 
   // Ctrl+V image paste — clipboard'tan resim yapıştır
@@ -417,6 +474,26 @@ export function MessageInput() {
               </>
             )}
           </div>
+          {recording ? (
+            <button
+              type="button"
+              onClick={stopRecording}
+              className="h-9 px-3 rounded-xl bg-accent-500 hover:bg-accent-600 text-white flex items-center gap-2 transition-colors shrink-0 animate-pulse"
+              title="Kaydı durdur ve gönder"
+            >
+              <Square size={14} />
+              <span className="text-xs font-mono">{Math.floor(recordingDur / 60)}:{String(recordingDur % 60).padStart(2, '0')}</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={startRecording}
+              className="text-ink-secondary hover:text-brand-500 transition-colors shrink-0"
+              title="Sesli mesaj"
+            >
+              <Mic size={20} />
+            </button>
+          )}
           <button
             onClick={submit}
             disabled={(!value.trim() && files.length === 0) || sending || files.some((f) => f.uploading)}
