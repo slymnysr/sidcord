@@ -128,9 +128,18 @@ class VoiceClient {
       (this as any).__pendingProducers = undefined;
     }
 
-    // Mikrofonu otomatik aç
+    // Mikrofonu otomatik aç (kullanıcının seçtiği input cihazıyla)
+    const inputId = localStorage.getItem('sidcord_input_device');
+    const audioConstraints: MediaTrackConstraints = {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    };
+    if (inputId && inputId !== 'default') {
+      audioConstraints.deviceId = { exact: inputId };
+    }
     this.micStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      audio: audioConstraints,
       video: false,
     });
     const audioTrack = this.micStream.getAudioTracks()[0];
@@ -139,14 +148,43 @@ class VoiceClient {
       appData: { source: 'mic' },
     });
     this.producerSource.set(this.audioProducer.id, 'mic');
+
+    // PTT: kullanıcı tuşa basana kadar mikrofonu kapalı tut
+    const pttEnabled = localStorage.getItem('sidcord_ptt') === '1';
+    if (pttEnabled) {
+      const pttKey = localStorage.getItem('sidcord_ptt_key') ?? 'Space';
+      audioTrack.enabled = false;
+      this.audioProducer.pause();
+      const down = (e: KeyboardEvent) => {
+        if ((e.code === pttKey || e.key === pttKey) && this.audioProducer) {
+          audioTrack.enabled = true;
+          this.audioProducer.resume();
+        }
+      };
+      const up = (e: KeyboardEvent) => {
+        if ((e.code === pttKey || e.key === pttKey) && this.audioProducer) {
+          audioTrack.enabled = false;
+          this.audioProducer.pause();
+        }
+      };
+      window.addEventListener('keydown', down);
+      window.addEventListener('keyup', up);
+      (this as any).__pttCleanup = () => {
+        window.removeEventListener('keydown', down);
+        window.removeEventListener('keyup', up);
+      };
+    }
     this.emit('connected', { channelId });
   }
 
   async publishCamera(): Promise<MediaStream> {
     if (!this.sendTransport) throw new Error('not connected');
     if (this.cameraStream) return this.cameraStream;
+    const videoId = localStorage.getItem('sidcord_video_device');
+    const videoConstraints: MediaTrackConstraints = { width: 1280, height: 720, frameRate: 30 };
+    if (videoId && videoId !== 'default') videoConstraints.deviceId = { exact: videoId };
     this.cameraStream = await navigator.mediaDevices.getUserMedia({
-      video: { width: 1280, height: 720, frameRate: 30 },
+      video: videoConstraints,
       audio: false,
     });
     const track = this.cameraStream.getVideoTracks()[0];
@@ -323,6 +361,11 @@ class VoiceClient {
     this.cameraStream = null;
     this.screenStream = null;
     this.channelId = null;
+    const cleanup = (this as any).__pttCleanup;
+    if (cleanup) {
+      cleanup();
+      (this as any).__pttCleanup = null;
+    }
     this.emit('remotes:changed', {});
   }
 
@@ -389,6 +432,11 @@ class VoiceClient {
       const el = document.createElement('audio');
       el.srcObject = stream;
       el.autoplay = true;
+      // Output device seçimi (Chrome destekli)
+      const outputId = localStorage.getItem('sidcord_output_device');
+      if (outputId && outputId !== 'default' && 'setSinkId' in el) {
+        (el as any).setSinkId(outputId).catch(() => {});
+      }
       document.body.appendChild(el);
       this.remoteAudioEls.set(producerId, el);
       // Speaking indicator için analyser başlat

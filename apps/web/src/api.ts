@@ -138,6 +138,8 @@ export interface APIPublicUser {
   created_at: string;
   friendship_state?: 'self' | 'accepted' | 'pending_sent' | 'pending_received' | 'blocked';
   dm_channel_id?: Snowflake;
+  mutual_guilds?: Array<{ id: Snowflake; name: string; icon_color: string; icon_text: string }>;
+  mutual_friends?: Array<{ user_id: Snowflake; display_name: string; avatar_color: string }>;
 }
 
 export interface APIDMChannel {

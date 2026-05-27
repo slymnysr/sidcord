@@ -447,18 +447,147 @@ function NotificationsTab() {
 }
 
 function VoiceTab() {
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [inputId, setInputId] = useState(localStorage.getItem('sidcord_input_device') ?? 'default');
+  const [outputId, setOutputId] = useState(localStorage.getItem('sidcord_output_device') ?? 'default');
+  const [videoId, setVideoId] = useState(localStorage.getItem('sidcord_video_device') ?? 'default');
+  const [ptt, setPtt] = useState(localStorage.getItem('sidcord_ptt') === '1');
+  const [pttKey, setPttKey] = useState(localStorage.getItem('sidcord_ptt_key') ?? 'Space');
+  const [capturing, setCapturing] = useState(false);
+
+  useEffect(() => {
+    navigator.mediaDevices
+      .enumerateDevices()
+      .then(setDevices)
+      .catch(() => {});
+  }, []);
+
+  function saveDevice(kind: 'input' | 'output' | 'video', id: string) {
+    if (kind === 'input') {
+      setInputId(id);
+      localStorage.setItem('sidcord_input_device', id);
+    } else if (kind === 'output') {
+      setOutputId(id);
+      localStorage.setItem('sidcord_output_device', id);
+    } else {
+      setVideoId(id);
+      localStorage.setItem('sidcord_video_device', id);
+    }
+  }
+
+  function togglePtt(v: boolean) {
+    setPtt(v);
+    localStorage.setItem('sidcord_ptt', v ? '1' : '0');
+  }
+
+  useEffect(() => {
+    if (!capturing) return;
+    function onKey(e: KeyboardEvent) {
+      e.preventDefault();
+      const k = e.code || e.key;
+      setPttKey(k);
+      localStorage.setItem('sidcord_ptt_key', k);
+      setCapturing(false);
+    }
+    window.addEventListener('keydown', onKey, { once: true });
+    return () => window.removeEventListener('keydown', onKey);
+  }, [capturing]);
+
+  const inputs = devices.filter((d) => d.kind === 'audioinput');
+  const outputs = devices.filter((d) => d.kind === 'audiooutput');
+  const videos = devices.filter((d) => d.kind === 'videoinput');
+
   return (
-    <div>
+    <div className="space-y-4">
       <h2 className="text-2xl font-bold text-ink-primary mb-5">Ses & Video</h2>
-      <div className="bg-surface-2 rounded-xl border border-line p-4">
-        <p className="text-sm text-ink-secondary mb-3">
-          Mikrofon ve kamera ayarları tarayıcı izinleriyle yönetilir.
-        </p>
-        <p className="text-sm text-ink-tertiary">
-          Sidcord otomatik olarak echo cancellation, noise suppression ve auto gain control
-          uygular (getUserMedia constraints).
-        </p>
+
+      <div className="bg-surface-2 rounded-xl border border-line p-4 space-y-3">
+        <h3 className="text-sm font-bold text-ink-primary">Giriş Cihazı (Mikrofon)</h3>
+        <select
+          value={inputId}
+          onChange={(e) => saveDevice('input', e.target.value)}
+          className="w-full bg-surface-1 border border-line rounded-lg px-3 py-2 text-ink-primary focus:border-brand-500/50 focus:outline-none"
+        >
+          <option value="default">Varsayılan</option>
+          {inputs.map((d) => (
+            <option key={d.deviceId} value={d.deviceId}>
+              {d.label || 'Mikrofon ' + d.deviceId.slice(0, 6)}
+            </option>
+          ))}
+        </select>
       </div>
+
+      <div className="bg-surface-2 rounded-xl border border-line p-4 space-y-3">
+        <h3 className="text-sm font-bold text-ink-primary">Çıkış Cihazı (Hoparlör)</h3>
+        <select
+          value={outputId}
+          onChange={(e) => saveDevice('output', e.target.value)}
+          className="w-full bg-surface-1 border border-line rounded-lg px-3 py-2 text-ink-primary focus:border-brand-500/50 focus:outline-none"
+        >
+          <option value="default">Varsayılan</option>
+          {outputs.map((d) => (
+            <option key={d.deviceId} value={d.deviceId}>
+              {d.label || 'Çıkış ' + d.deviceId.slice(0, 6)}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="bg-surface-2 rounded-xl border border-line p-4 space-y-3">
+        <h3 className="text-sm font-bold text-ink-primary">Kamera</h3>
+        <select
+          value={videoId}
+          onChange={(e) => saveDevice('video', e.target.value)}
+          className="w-full bg-surface-1 border border-line rounded-lg px-3 py-2 text-ink-primary focus:border-brand-500/50 focus:outline-none"
+        >
+          <option value="default">Varsayılan</option>
+          {videos.map((d) => (
+            <option key={d.deviceId} value={d.deviceId}>
+              {d.label || 'Kamera ' + d.deviceId.slice(0, 6)}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="bg-surface-2 rounded-xl border border-line p-4 space-y-3">
+        <h3 className="text-sm font-bold text-ink-primary">Giriş Modu</h3>
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input
+            type="radio"
+            checked={!ptt}
+            onChange={() => togglePtt(false)}
+            className="accent-brand-500"
+          />
+          <span className="text-sm text-ink-primary">
+            Ses Aktivitesi <span className="text-ink-tertiary">(her zaman açık)</span>
+          </span>
+        </label>
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input
+            type="radio"
+            checked={ptt}
+            onChange={() => togglePtt(true)}
+            className="accent-brand-500"
+          />
+          <span className="text-sm text-ink-primary">
+            Bas-Konuş <span className="text-ink-tertiary">(sadece tuşa basılıyken)</span>
+          </span>
+        </label>
+        {ptt && (
+          <button
+            type="button"
+            onClick={() => setCapturing(true)}
+            className="mt-2 px-3 py-2 rounded-lg bg-surface-3 hover:bg-surface-1 text-ink-primary text-sm font-semibold border border-line"
+          >
+            {capturing ? 'Tuşa bas...' : `Tuş: ${pttKey}`}
+          </button>
+        )}
+      </div>
+
+      <p className="text-xs text-ink-tertiary">
+        Sidcord otomatik olarak echo cancellation, noise suppression ve auto gain control uygular
+        (getUserMedia constraints).
+      </p>
     </div>
   );
 }

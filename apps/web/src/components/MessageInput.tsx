@@ -5,6 +5,7 @@ import { useAppDispatch, useAppSelector, setReplyTo } from '../store';
 import { sendTyping } from '../gateway';
 import { EmojiPicker } from './EmojiPicker';
 import { MentionPicker } from './MentionPicker';
+import { MarkdownToolbar } from './MarkdownToolbar';
 
 interface PendingFile {
   id: string;
@@ -278,6 +279,7 @@ export function MessageInput() {
             : 'border-line focus-within:border-brand-500/50 focus-within:shadow-glow')
         }
       >
+        <MarkdownToolbar textarea={ref.current} onChange={setValue} />
         {files.length > 0 && (
           <div className="px-4 pt-3 flex flex-wrap gap-2 border-b border-line pb-3">
             {files.map((f) => (

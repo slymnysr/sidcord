@@ -208,6 +208,57 @@ export function UserProfileCard({ userId, onClose, anchorRect }: Props) {
                   </p>
                 </div>
 
+                {user.mutual_guilds && user.mutual_guilds.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-line">
+                    <h3 className="text-[10px] font-bold uppercase text-ink-tertiary tracking-wider mb-2">
+                      Ortak Sunucular — {user.mutual_guilds.length}
+                    </h3>
+                    <div className="space-y-1.5">
+                      {user.mutual_guilds.slice(0, 4).map((g) => (
+                        <div key={g.id} className="flex items-center gap-2">
+                          <div
+                            className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] font-bold shrink-0"
+                            style={{ backgroundColor: g.icon_color }}
+                          >
+                            {g.icon_text}
+                          </div>
+                          <span className="text-xs text-ink-primary truncate">{g.name}</span>
+                        </div>
+                      ))}
+                      {user.mutual_guilds.length > 4 && (
+                        <div className="text-[10px] text-ink-tertiary">
+                          +{user.mutual_guilds.length - 4} daha
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {user.mutual_friends && user.mutual_friends.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-line">
+                    <h3 className="text-[10px] font-bold uppercase text-ink-tertiary tracking-wider mb-2">
+                      Ortak Arkadaşlar — {user.mutual_friends.length}
+                    </h3>
+                    <div className="flex flex-wrap gap-1">
+                      {user.mutual_friends.slice(0, 8).map((f) => (
+                        <div
+                          key={f.user_id}
+                          title={f.display_name}
+                          className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold"
+                          style={{ backgroundColor: f.avatar_color }}
+                        >
+                          {f.display_name.slice(0, 1).toUpperCase()}
+                        </div>
+                      ))}
+                      {user.mutual_friends.length > 8 && (
+                        <div className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold bg-surface-3 text-ink-secondary">
+                          +{user.mutual_friends.length - 8}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {user.id !== me?.id && (
                   <div className="mt-3 flex gap-2">
                     <button

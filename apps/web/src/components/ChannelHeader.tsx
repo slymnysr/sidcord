@@ -187,6 +187,21 @@ function NotificationItem({ n }: { n: import('../api').APINotification }) {
   const unread = !n.read_at;
   const actor = n.actor_display_name ?? n.actor_username ?? 'Birisi';
   const color = n.actor_avatar_color ?? '#6B7280';
+  // Mesaj veya mention bildirimine tıklayınca kanala git
+  function goToMessage() {
+    if (!n.channel_id) return;
+    dispatch(selectChannel(n.channel_id));
+    setTimeout(() => {
+      if (n.message_id) {
+        const el = document.getElementById('msg-' + n.message_id);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.classList.add('bg-brand-500/20');
+          setTimeout(() => el.classList.remove('bg-brand-500/20'), 1500);
+        }
+      }
+    }, 300);
+  }
 
   let title = '';
   let body = '';
@@ -209,6 +224,8 @@ function NotificationItem({ n }: { n: import('../api').APINotification }) {
   function onClick() {
     if (n.type === 'friend_request' && n.actor_id) {
       dispatch(openProfileCard({ userId: n.actor_id, anchorRect: null }));
+    } else if (n.channel_id) {
+      goToMessage();
     }
   }
 
@@ -300,7 +317,21 @@ function PinsButton({ channelId }: { channelId: string }) {
                   const name = u?.display_name ?? '…';
                   const color = u?.avatar_color ?? '#6B7280';
                   return (
-                    <li key={m.id} className="px-4 py-3 border-b border-line hover:bg-surface-2">
+                    <li
+                      key={m.id}
+                      className="px-4 py-3 border-b border-line hover:bg-surface-2 cursor-pointer"
+                      onClick={() => {
+                        setOpen(false);
+                        setTimeout(() => {
+                          const el = document.getElementById('msg-' + m.id);
+                          if (el) {
+                            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            el.classList.add('bg-brand-500/20');
+                            setTimeout(() => el.classList.remove('bg-brand-500/20'), 1500);
+                          }
+                        }, 100);
+                      }}
+                    >
                       <div className="flex gap-2.5 items-start">
                         <div
                           className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"

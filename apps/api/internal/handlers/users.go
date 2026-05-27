@@ -44,6 +44,19 @@ func (h *Handler) UpdateMyStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // Genel kullanıcı profili — username, display_name, avatar_color/url, bio, status, bot, created_at
+type mutualGuildView struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	IconColor string `json:"icon_color"`
+	IconText  string `json:"icon_text"`
+}
+
+type mutualFriendView struct {
+	UserID      string `json:"user_id"`
+	DisplayName string `json:"display_name"`
+	AvatarColor string `json:"avatar_color"`
+}
+
 type publicUserView struct {
 	ID          string    `json:"id"`
 	Username    string    `json:"username"`
@@ -58,7 +71,9 @@ type publicUserView struct {
 	// Friendship state with the requesting user (none / pending_sent / pending_received / accepted / self)
 	FriendshipState string `json:"friendship_state,omitempty"`
 	// Has open DM with the requesting user
-	DMChannelID *string `json:"dm_channel_id,omitempty"`
+	DMChannelID   *string            `json:"dm_channel_id,omitempty"`
+	MutualGuilds  []mutualGuildView  `json:"mutual_guilds,omitempty"`
+	MutualFriends []mutualFriendView `json:"mutual_friends,omitempty"`
 }
 
 func (h *Handler) GetUserPublic(w http.ResponseWriter, r *http.Request) {
@@ -124,6 +139,52 @@ func (h *Handler) GetUserPublic(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			dmStr := strconv.FormatInt(dmID, 10)
 			v.DMChannelID = &dmStr
+		}
+
+		// Ortak sunucular
+		if rows, err := h.Pool.Query(r.Context(), `
+            SELECT g.id::text, g.name, g.icon_color, g.icon_text
+            FROM guilds g
+            JOIN guild_members m1 ON m1.guild_id = g.id AND m1.user_id = $1
+            JOIN guild_members m2 ON m2.guild_id = g.id AND m2.user_id = $2
+            ORDER BY g.name ASC
+        `, requester, id); err == nil {
+			defer rows.Close()
+			v.MutualGuilds = []mutualGuildView{}
+			for rows.Next() {
+				var mg mutualGuildView
+				if err := rows.Scan(&mg.ID, &mg.Name, &mg.IconColor, &mg.IconText); err == nil {
+					v.MutualGuilds = append(v.MutualGuilds, mg)
+				}
+			}
+		}
+
+		// Ortak arkadaşlar (her ikisinin de 'accepted' arkadaşı olanlar)
+		if rows, err := h.Pool.Query(r.Context(), `
+            WITH my_friends AS (
+                SELECT CASE WHEN user_a_id = $1 THEN user_b_id ELSE user_a_id END AS uid
+                FROM friendships
+                WHERE (user_a_id = $1 OR user_b_id = $1) AND status = 'accepted'
+            ),
+            their_friends AS (
+                SELECT CASE WHEN user_a_id = $2 THEN user_b_id ELSE user_a_id END AS uid
+                FROM friendships
+                WHERE (user_a_id = $2 OR user_b_id = $2) AND status = 'accepted'
+            )
+            SELECT u.id::text, u.display_name, u.avatar_color
+            FROM users u
+            WHERE u.id IN (SELECT uid FROM my_friends INTERSECT SELECT uid FROM their_friends)
+            ORDER BY u.display_name
+            LIMIT 20
+        `, requester, id); err == nil {
+			defer rows.Close()
+			v.MutualFriends = []mutualFriendView{}
+			for rows.Next() {
+				var mf mutualFriendView
+				if err := rows.Scan(&mf.UserID, &mf.DisplayName, &mf.AvatarColor); err == nil {
+					v.MutualFriends = append(v.MutualFriends, mf)
+				}
+			}
 		}
 	}
 
