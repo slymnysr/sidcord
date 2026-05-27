@@ -475,6 +475,39 @@ export const api = {
       request<void>(`/events/${eventId}/subscribers/me`, { method: 'DELETE' }),
   },
 
+  stickers: {
+    list: (guildId: string) =>
+      request<
+        Array<{
+          id: Snowflake;
+          guild_id: Snowflake;
+          name: string;
+          description?: string;
+          tags?: string;
+          url: string;
+          format: 'png' | 'apng' | 'lottie';
+          creator_id: Snowflake;
+          created_at: string;
+        }>
+      >(`/guilds/${guildId}/stickers`),
+    create: (
+      guildId: string,
+      input: { name: string; description?: string; tags?: string; url: string; format?: string },
+    ) =>
+      request<{ id: Snowflake }>(`/guilds/${guildId}/stickers`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    delete: (stickerId: string) =>
+      request<void>(`/stickers/${stickerId}`, { method: 'DELETE' }),
+  },
+
+  push: {
+    subscribe: (input: { endpoint: string; p256dh: string; auth: string }) =>
+      request<void>('/users/me/push-subscriptions', { method: 'PUT', body: JSON.stringify(input) }),
+    unsubscribeAll: () => request<void>('/users/me/push-subscriptions', { method: 'DELETE' }),
+  },
+
   sounds: {
     list: (guildId: string) =>
       request<

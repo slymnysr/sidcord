@@ -165,6 +165,15 @@ func New(h *handlers.Handler, iss *auth.Issuer) http.Handler {
 			r.Post("/guilds/{id}/sounds", h.CreateSound)
 			r.Delete("/sounds/{id}", h.DeleteSound)
 			r.Post("/sounds/{id}/play", h.PlaySound)
+
+			// P2: Stickers
+			r.Get("/guilds/{id}/stickers", h.ListStickers)
+			r.Post("/guilds/{id}/stickers", h.CreateSticker)
+			r.Delete("/stickers/{id}", h.DeleteSticker)
+
+			// P2: Push subscriptions
+			r.Put("/users/me/push-subscriptions", h.SubscribePush)
+			r.Delete("/users/me/push-subscriptions", h.UnsubscribePush)
 		})
 
 		// Webhook execute — anonim (token URL içinde doğrulanır)

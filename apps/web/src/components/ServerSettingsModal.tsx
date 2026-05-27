@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Settings, Shield, Ban, Trash2, Plus, Check, Calendar, Volume2, Play, X } from 'lucide-react';
+import { Settings, Shield, Ban, Trash2, Plus, Check, Calendar, Volume2, Play, X, Smile, Sticker } from 'lucide-react';
 import { useAppSelector } from '../store';
 import { api, type APIRole, type APIBan, type APIMember } from '../api';
 import { PERM, PERM_LABELS, has, toggle } from '../perms';
 
-type Tab = 'overview' | 'roles' | 'members' | 'bans' | 'events' | 'soundboard';
+type Tab = 'overview' | 'roles' | 'members' | 'bans' | 'events' | 'soundboard' | 'emojis' | 'stickers';
 
 export function ServerSettingsModal() {
   const guild = useAppSelector((s) => s.guilds.list.find((g) => g.id === s.guilds.selectedId));
@@ -36,6 +36,12 @@ export function ServerSettingsModal() {
         <TabBtn icon={<Volume2 size={16} />} active={tab === 'soundboard'} onClick={() => setTab('soundboard')}>
           Soundboard
         </TabBtn>
+        <TabBtn icon={<Smile size={16} />} active={tab === 'emojis'} onClick={() => setTab('emojis')}>
+          Emojiler
+        </TabBtn>
+        <TabBtn icon={<Sticker size={16} />} active={tab === 'stickers'} onClick={() => setTab('stickers')}>
+          Etiketler
+        </TabBtn>
       </nav>
 
       <div className="flex-1 overflow-y-auto p-6">
@@ -45,6 +51,8 @@ export function ServerSettingsModal() {
         {tab === 'bans' && <BansTab guildId={guild.id} />}
         {tab === 'events' && <EventsTab guildId={guild.id} />}
         {tab === 'soundboard' && <SoundboardTab guildId={guild.id} />}
+        {tab === 'emojis' && <EmojisTab guildId={guild.id} />}
+        {tab === 'stickers' && <StickersTab guildId={guild.id} />}
       </div>
     </div>
   );
@@ -787,3 +795,228 @@ function SoundboardTab({ guildId }: { guildId: string }) {
 
 // Play helper unused yet — voice kanaldayken SoundboardPlayButton kullanır
 void Play;
+
+function EmojisTab({ guildId }: { guildId: string }) {
+  const [emojis, setEmojis] = useState<Awaited<ReturnType<typeof api.emojis.list>>>([]);
+  const [name, setName] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  async function refresh() {
+    setEmojis(await api.emojis.list(guildId).catch(() => []));
+  }
+  useEffect(() => {
+    refresh();
+  }, [guildId]);
+
+  async function submit() {
+    if (!file || !name.trim()) return;
+    setUploading(true);
+    try {
+      const presign = await api.uploads.presign({
+        filename: file.name,
+        content_type: file.type || 'image/png',
+        size_bytes: file.size,
+      });
+      await fetch(presign.upload_url, {
+        method: 'PUT',
+        body: file,
+        headers: file.type ? { 'Content-Type': file.type } : undefined,
+      });
+      await api.emojis.create(guildId, {
+        name: name.trim(),
+        url: presign.public_url,
+        animated: file.type === 'image/gif',
+      });
+      setName('');
+      setFile(null);
+      refresh();
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div>
+      <h2 className="text-2xl font-bold text-ink-primary mb-4">Özel Emojiler</h2>
+      <div className="bg-surface-2 border border-line rounded-xl p-4 mb-4">
+        <p className="text-sm text-ink-secondary mb-3">
+          PNG/GIF · 128×128 önerilir · maksimum 256KB · ad 2-32 karakter (sadece a-z, 0-9, _)
+        </p>
+        <div className="flex gap-2">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value.replace(/[^\w]/g, ''))}
+            placeholder="emoji_adi"
+            maxLength={32}
+            className="flex-1 bg-surface-1 border border-line rounded-lg px-3 py-2 text-ink-primary focus:border-brand-500/50 focus:outline-none"
+          />
+          <input
+            type="file"
+            accept="image/png,image/gif,image/webp"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            className="flex-1 text-sm text-ink-secondary file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-surface-3 file:text-ink-primary file:font-semibold"
+          />
+          <button
+            onClick={submit}
+            disabled={!file || !name.trim() || uploading}
+            className="px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-400 disabled:bg-surface-3 text-white font-semibold"
+          >
+            {uploading ? 'Yükleniyor...' : 'Ekle'}
+          </button>
+        </div>
+      </div>
+
+      {emojis.length === 0 ? (
+        <p className="text-ink-tertiary text-sm">Henüz özel emoji yok.</p>
+      ) : (
+        <div className="grid grid-cols-6 md:grid-cols-8 gap-2">
+          {emojis.map((e) => (
+            <div
+              key={e.id}
+              className="aspect-square bg-surface-2 border border-line rounded-xl p-2 flex flex-col items-center justify-center gap-1 group relative"
+            >
+              <img src={e.url} alt={e.name} className="w-10 h-10 object-contain" />
+              <span className="text-[10px] truncate w-full text-center text-ink-secondary">
+                :{e.name}:
+              </span>
+              <button
+                onClick={() => {
+                  if (confirm(`:${e.name}: emojisini sil?`)) {
+                    api.emojis.delete(guildId, e.id).then(refresh);
+                  }
+                }}
+                className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 w-5 h-5 rounded bg-accent-500 hover:bg-accent-600 text-white flex items-center justify-center transition-opacity"
+              >
+                <X size={10} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StickersTab({ guildId }: { guildId: string }) {
+  const [stickers, setStickers] = useState<Awaited<ReturnType<typeof api.stickers.list>>>([]);
+  const [name, setName] = useState('');
+  const [tags, setTags] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  async function refresh() {
+    setStickers(await api.stickers.list(guildId).catch(() => []));
+  }
+  useEffect(() => {
+    refresh();
+  }, [guildId]);
+
+  async function submit() {
+    if (!file || !name.trim()) return;
+    setUploading(true);
+    try {
+      const presign = await api.uploads.presign({
+        filename: file.name,
+        content_type: file.type || 'image/png',
+        size_bytes: file.size,
+      });
+      await fetch(presign.upload_url, {
+        method: 'PUT',
+        body: file,
+        headers: file.type ? { 'Content-Type': file.type } : undefined,
+      });
+      const format = file.name.endsWith('.apng')
+        ? 'apng'
+        : file.name.endsWith('.json')
+          ? 'lottie'
+          : 'png';
+      await api.stickers.create(guildId, {
+        name: name.trim(),
+        tags,
+        url: presign.public_url,
+        format,
+      });
+      setName('');
+      setTags('');
+      setFile(null);
+      refresh();
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div>
+      <h2 className="text-2xl font-bold text-ink-primary mb-4">Etiketler (Sticker)</h2>
+      <div className="bg-surface-2 border border-line rounded-xl p-4 mb-4">
+        <p className="text-sm text-ink-secondary mb-3">
+          PNG/APNG/Lottie · 320×320 önerilir · maksimum 500KB
+        </p>
+        <div className="space-y-2">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Sticker adı"
+            maxLength={30}
+            className="w-full bg-surface-1 border border-line rounded-lg px-3 py-2 text-ink-primary focus:border-brand-500/50 focus:outline-none"
+          />
+          <input
+            value={tags}
+            onChange={(e) => setTags(e.target.value)}
+            placeholder="Etiketler (virgülle ayrılmış, örn: gülen, mutlu, kawaii)"
+            className="w-full bg-surface-1 border border-line rounded-lg px-3 py-2 text-ink-primary focus:border-brand-500/50 focus:outline-none"
+          />
+          <div className="flex gap-2">
+            <input
+              type="file"
+              accept="image/png,image/apng,.apng,application/json,.json"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              className="flex-1 text-sm text-ink-secondary file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-surface-3 file:text-ink-primary file:font-semibold"
+            />
+            <button
+              onClick={submit}
+              disabled={!file || !name.trim() || uploading}
+              className="px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-400 disabled:bg-surface-3 text-white font-semibold"
+            >
+              {uploading ? 'Yükleniyor...' : 'Ekle'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {stickers.length === 0 ? (
+        <p className="text-ink-tertiary text-sm">Henüz sticker yok.</p>
+      ) : (
+        <div className="grid grid-cols-3 md:grid-cols-4 gap-3">
+          {stickers.map((s) => (
+            <div
+              key={s.id}
+              className="bg-surface-2 border border-line rounded-xl p-3 flex flex-col items-center gap-2 group relative"
+            >
+              <img src={s.url} alt={s.name} className="w-24 h-24 object-contain" />
+              <div className="text-sm font-semibold text-ink-primary truncate w-full text-center">
+                {s.name}
+              </div>
+              {s.tags && (
+                <div className="text-[10px] text-ink-tertiary truncate w-full text-center">
+                  {s.tags}
+                </div>
+              )}
+              <button
+                onClick={() => {
+                  if (confirm(`"${s.name}" stickerini sil?`)) {
+                    api.stickers.delete(s.id).then(refresh);
+                  }
+                }}
+                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 w-6 h-6 rounded bg-accent-500 hover:bg-accent-600 text-white flex items-center justify-center transition-opacity"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
