@@ -11,6 +11,8 @@ import { AuthPage } from './pages/AuthPage';
 import { Modal } from './components/Modal';
 import { DMSidebar } from './components/DMSidebar';
 import { UserProfileCard } from './components/UserProfileCard';
+import { ToastContainer } from './components/Toast';
+import { ReconnectBanner } from './components/ReconnectBanner';
 import {
   useAppDispatch,
   useAppSelector,
@@ -31,9 +33,11 @@ import {
   openModal,
   fetchReadStates,
   ackChannel,
+  fetchGuildRoles,
 } from './store';
 import { tokenStore } from './api';
 import { connectGateway, joinGuild, joinUser, disconnectGateway, onGuildEvent } from './gateway';
+import { playMessageSound, playMentionSound } from './notifSound';
 
 export default function App() {
   const dispatch = useAppDispatch();
@@ -68,7 +72,11 @@ export default function App() {
       joinUser(user.id, {
         onDMMessage: (event: any) => {
           if (event.author) dispatch(upsertUser(event.author));
-          if (event.message) dispatch(pushMessage(event.message));
+          if (event.message) {
+            dispatch(pushMessage(event.message));
+            // Başka kullanıcıdan DM → ses çal
+            if (event.message.author_id !== user.id) playMentionSound();
+          }
         },
       });
     }
@@ -82,10 +90,22 @@ export default function App() {
     if (!guildId) return;
     dispatch(fetchChannels(guildId));
     dispatch(fetchMembers(guildId));
+    dispatch(fetchGuildRoles(guildId));
     joinGuild(guildId, {
       onMessage: (event: any) => {
         if (event.author) dispatch(upsertUser(event.author));
-        if (event.message) dispatch(pushMessage(event.message));
+        if (event.message) {
+          dispatch(pushMessage(event.message));
+          const msg = event.message;
+          if (msg.author_id !== user!.id) {
+            const mentioned =
+              msg.content?.includes(`<@${user!.id}>`) ||
+              msg.content?.includes('@everyone') ||
+              msg.content?.includes('@here');
+            if (mentioned) playMentionSound();
+            else if (msg.channel_id !== channelId) playMessageSound();
+          }
+        }
       },
       onPresence: (ids) => {
         dispatch(setGuildPresence({ guildId, userIds: Array.from(ids) }));
@@ -198,6 +218,8 @@ export default function App() {
           onClose={() => dispatch(openProfileCard(null))}
         />
       )}
+      <ToastContainer />
+      <ReconnectBanner />
     </div>
   );
 }

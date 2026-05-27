@@ -368,6 +368,53 @@ const typingSlice = createSlice({
   },
 });
 
+// ===== GUILD ROLES =====
+interface GuildRolesState {
+  byGuild: Record<string, any[]>;
+}
+export const fetchGuildRoles = createAsyncThunk('guildRoles/fetch', async (guildId: string) => {
+  const list = await api.guilds.roles(guildId);
+  return { guildId, list };
+});
+const guildRolesSlice = createSlice({
+  name: 'guildRoles',
+  initialState: { byGuild: {} } as GuildRolesState,
+  reducers: {},
+  extraReducers: (b) => {
+    b.addCase(fetchGuildRoles.fulfilled, (s, a) => {
+      s.byGuild[a.payload.guildId] = a.payload.list;
+    });
+  },
+});
+
+// ===== TOASTS =====
+interface ToastItem {
+  id: string;
+  kind: 'success' | 'error' | 'info';
+  message: string;
+}
+interface ToastsState {
+  list: ToastItem[];
+}
+const toastsSlice = createSlice({
+  name: 'toasts',
+  initialState: { list: [] } as ToastsState,
+  reducers: {
+    addToast: {
+      reducer: (state, action: PayloadAction<ToastItem>) => {
+        state.list.push(action.payload);
+        if (state.list.length > 5) state.list.shift();
+      },
+      prepare: (input: { kind: 'success' | 'error' | 'info'; message: string }) => ({
+        payload: { id: Math.random().toString(36).slice(2), ...input },
+      }),
+    },
+    removeToast(state, action: PayloadAction<string>) {
+      state.list = state.list.filter((t) => t.id !== action.payload);
+    },
+  },
+});
+
 // ===== READ STATES =====
 interface ReadStatesState {
   byChannel: Record<string, APIReadState>;
@@ -520,6 +567,7 @@ export const { setGuildPresence } = presenceSlice.actions;
 export const { setTyping, pruneTyping } = typingSlice.actions;
 export const { toggleMemberList, openModal, closeModal, setMode, selectDM, openProfileCard, setPendingDM, openEditChannel, openChannelPerms, setReplyTo } = uiSlice.actions;
 export const { bumpRead } = readStatesSlice.actions;
+export const { addToast, removeToast } = toastsSlice.actions;
 
 // === Mode switching thunks ===
 // DM moduna geçince çalışan kanalı temizle/son DM'i geri yükle.
@@ -570,6 +618,8 @@ export const store = configureStore({
     presence: presenceSlice.reducer,
     typing: typingSlice.reducer,
     readStates: readStatesSlice.reducer,
+    toasts: toastsSlice.reducer,
+    guildRoles: guildRolesSlice.reducer,
     ui: uiSlice.reducer,
   },
 });

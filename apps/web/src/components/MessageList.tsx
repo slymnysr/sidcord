@@ -110,24 +110,51 @@ export function MessageList() {
           const prevTs = prev ? new Date(prev.created_at).getTime() : 0;
           const curTs = new Date(m.created_at).getTime();
           const grouped = !!prev && prev.author_id === m.author_id && curTs - prevTs < 5 * 60 * 1000;
+          // Yeni gün başladıysa tarih ayracı göster
+          const showDateDivider =
+            !prev || new Date(prev.created_at).toDateString() !== new Date(m.created_at).toDateString();
           return (
-            <MessageItem
-              key={m.id}
-              messageId={m.id}
-              authorId={m.author_id}
-              authorName={author?.display_name ?? '...'}
-              authorColor={author?.avatar_color ?? '#6B7280'}
-              isBot={!!author?.bot}
-              ts={curTs}
-              editedAt={m.edited_at}
-              content={m.content}
-              attachments={m.attachments ?? []}
-              grouped={grouped}
-              repliedToId={m.replied_to_id}
-            />
+            <div key={m.id}>
+              {showDateDivider && <DateDivider date={new Date(m.created_at)} />}
+              <MessageItem
+                messageId={m.id}
+                authorId={m.author_id}
+                authorName={author?.display_name ?? '...'}
+                authorColor={author?.avatar_color ?? '#6B7280'}
+                isBot={!!author?.bot}
+                ts={curTs}
+                editedAt={m.edited_at}
+                content={m.content}
+                attachments={m.attachments ?? []}
+                grouped={grouped && !showDateDivider}
+                repliedToId={m.replied_to_id}
+              />
+            </div>
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+function DateDivider({ date }: { date: Date }) {
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  let label: string;
+  if (date.toDateString() === today.toDateString()) label = 'Bugün';
+  else if (date.toDateString() === yesterday.toDateString()) label = 'Dün';
+  else
+    label = date.toLocaleDateString('tr-TR', {
+      day: 'numeric',
+      month: 'long',
+      year: date.getFullYear() === today.getFullYear() ? undefined : 'numeric',
+    });
+  return (
+    <div className="flex items-center gap-3 my-4">
+      <div className="flex-1 h-px bg-line" />
+      <span className="text-[10px] font-bold uppercase text-ink-tertiary tracking-wider">{label}</span>
+      <div className="flex-1 h-px bg-line" />
     </div>
   );
 }
@@ -307,9 +334,20 @@ function MessageItem({
   }
 
   return (
-    <li className="group relative px-2 -mx-2 py-1 hover:bg-surface-1/40 rounded">
+    <li id={'msg-' + messageId} className="group relative px-2 -mx-2 py-1 hover:bg-surface-1/40 rounded transition-colors">
       {repliedTo && (
-        <div className="flex items-center gap-1.5 text-xs text-ink-tertiary mb-1 pl-12 truncate">
+        <button
+          type="button"
+          onClick={() => {
+            const el = document.getElementById('msg-' + repliedTo.id);
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              el.classList.add('bg-brand-500/20');
+              setTimeout(() => el.classList.remove('bg-brand-500/20'), 1500);
+            }
+          }}
+          className="flex items-center gap-1.5 text-xs text-ink-tertiary mb-1 pl-12 max-w-full hover:text-ink-secondary w-full text-left"
+        >
           <span className="w-6 h-3 border-l-2 border-t-2 border-line rounded-tl-md inline-block ml-[-22px] shrink-0" />
           <span
             className="w-4 h-4 rounded-full flex items-center justify-center text-white text-[8px] font-bold shrink-0"
@@ -321,7 +359,7 @@ function MessageItem({
             @{repliedAuthor?.display_name ?? '...'}
           </span>
           <span className="text-ink-tertiary truncate">{repliedTo.content || '<dosya>'}</span>
-        </div>
+        </button>
       )}
       <div className="flex gap-3">
       {!grouped ? (

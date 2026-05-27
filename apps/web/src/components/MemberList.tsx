@@ -14,18 +14,43 @@ import { api, type APIMember } from '../api';
 export function MemberList() {
   const guildId = useAppSelector((s) => s.guilds.selectedId);
   const members = useAppSelector((s) => (guildId ? s.members.byGuild[guildId] ?? [] : []));
+  const roles = useAppSelector((s) => (guildId ? s.guilds.list.find((g) => g.id === guildId) : null));
+  const allRoles = useAppSelector((s) => s.guildRoles?.byGuild?.[guildId ?? ''] ?? []);
   const onlineIds = useAppSelector((s) => (guildId ? s.presence.onlineByGuild[guildId] ?? [] : []));
 
   const onlineSet = useMemo(() => new Set(onlineIds), [onlineIds]);
 
   if (!guildId) return null;
 
-  const online: APIMember[] = [];
-  const offline: APIMember[] = [];
+  // Discord davranışı: hoist=true rollere göre üyeleri grupla
+  // Her üye en yüksek hoist rolüne göre kümelenir
+  const hoistRoles = allRoles
+    .filter((r: any) => r.hoist && !r.is_everyone)
+    .sort((a: any, b: any) => b.position - a.position);
+
+  const onlineMembers: APIMember[] = [];
+  const offlineMembers: APIMember[] = [];
   for (const m of members) {
-    if (onlineSet.has(m.user_id)) online.push(m);
-    else offline.push(m);
+    if (onlineSet.has(m.user_id)) onlineMembers.push(m);
+    else offlineMembers.push(m);
   }
+
+  // Her hoist rolü için online üyeleri topla
+  const roleBuckets: { role: any; members: APIMember[] }[] = [];
+  const assigned = new Set<string>();
+  for (const r of hoistRoles) {
+    const bucket: APIMember[] = [];
+    for (const m of onlineMembers) {
+      if (!assigned.has(m.user_id) && m.role_ids?.includes(r.id)) {
+        bucket.push(m);
+        assigned.add(m.user_id);
+      }
+    }
+    if (bucket.length > 0) roleBuckets.push({ role: r, members: bucket });
+  }
+  const onlineRest = onlineMembers.filter((m) => !assigned.has(m.user_id));
+
+  void roles;
 
   return (
     <aside className="w-60 bg-surface-1 border-l border-line overflow-y-auto py-3">
@@ -35,11 +60,26 @@ export function MemberList() {
         </p>
       )}
 
-      {online.length > 0 && (
-        <Group label="Çevrimiçi" count={online.length} members={online} online />
+      {roleBuckets.map((b) => (
+        <Group
+          key={b.role.id}
+          label={b.role.name}
+          count={b.members.length}
+          members={b.members}
+          online
+          color={`#${(b.role.color as number).toString(16).padStart(6, '0')}`}
+        />
+      ))}
+      {onlineRest.length > 0 && (
+        <Group
+          label={roleBuckets.length > 0 ? 'Online' : 'Çevrimiçi'}
+          count={onlineRest.length}
+          members={onlineRest}
+          online
+        />
       )}
-      {offline.length > 0 && (
-        <Group label="Çevrimdışı" count={offline.length} members={offline} online={false} />
+      {offlineMembers.length > 0 && (
+        <Group label="Çevrimdışı" count={offlineMembers.length} members={offlineMembers} online={false} />
       )}
     </aside>
   );
@@ -50,16 +90,21 @@ function Group({
   count,
   members,
   online,
+  color,
 }: {
   label: string;
   count: number;
   members: APIMember[];
   online: boolean;
+  color?: string;
 }) {
   return (
     <section className="mb-5">
-      <div className="px-4 mb-2 text-[11px] font-bold text-ink-tertiary uppercase tracking-[0.08em] flex items-center justify-between">
-        <span>{label}</span>
+      <div
+        className="px-4 mb-2 text-[11px] font-bold uppercase tracking-[0.08em] flex items-center justify-between"
+        style={{ color: color ?? undefined }}
+      >
+        <span className={color ? '' : 'text-ink-tertiary'}>{label}</span>
         <span className="text-ink-muted">{count}</span>
       </div>
       <ul className="px-2 space-y-0.5">

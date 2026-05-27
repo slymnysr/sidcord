@@ -33,7 +33,7 @@ export function MessageInput() {
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [stickerOpen, setStickerOpen] = useState(false);
   const [stickers, setStickers] = useState<Awaited<ReturnType<typeof api.stickers.list>>>([]);
-  const [mention, setMention] = useState<{ type: '@' | '#'; q: string; start: number } | null>(null);
+  const [mention, setMention] = useState<{ type: '@' | '#' | ':' | '/'; q: string; start: number } | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const lastTyping = useRef(0);
@@ -188,18 +188,33 @@ export function MessageInput() {
       lastTyping.current = now;
       sendTyping(guildId, channelId);
     }
-    // @username veya #channel için trigger algıla
+    // @username, #channel, :emoji, /slash için trigger algıla
     const pos = e.target.selectionStart ?? v.length;
     const before = v.slice(0, pos);
-    const m = before.match(/(^|\s)([@#])([\wçğıöşü-]{0,32})$/i);
+    const m = before.match(/(^|\s)([@#:/])([\wçğıöşü-]{0,32})$/i);
     if (m) {
       setMention({
-        type: m[2] as '@' | '#',
+        type: m[2] as any,
         q: m[3] ?? '',
         start: pos - (m[3]?.length ?? 0) - 1,
       });
     } else {
       setMention(null);
+    }
+  }
+
+  // Ctrl+V image paste — clipboard'tan resim yapıştır
+  function onPaste(e: React.ClipboardEvent) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          e.preventDefault();
+          uploadFile(file);
+        }
+      }
     }
   }
 
@@ -298,6 +313,7 @@ export function MessageInput() {
             ref={ref}
             value={value}
             onChange={handleInputChange}
+            onPaste={onPaste}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey && !mention) {
                 e.preventDefault();

@@ -197,6 +197,57 @@ class VoiceClient {
   }
 
   // Discord web ile aynı davranış: sustur = producer.pause + track.enabled=false.
+  // === Speaking indicator (Discord paritesi) ===
+  private speakingUsers = new Set<string>();
+  private speakingAnalyzers = new Map<string, { ac: AudioContext; raf?: number }>();
+
+  speakingSet(): Set<string> {
+    return new Set(this.speakingUsers);
+  }
+
+  startSpeakingAnalyzer(userId: string, stream: MediaStream) {
+    if (this.speakingAnalyzers.has(userId)) return;
+    try {
+      const AC = window.AudioContext || (window as any).webkitAudioContext;
+      const ac = new AC();
+      const src = ac.createMediaStreamSource(stream);
+      const analyser = ac.createAnalyser();
+      analyser.fftSize = 256;
+      src.connect(analyser);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const meta: { ac: AudioContext; raf?: number } = { ac };
+      const tick = () => {
+        analyser.getByteFrequencyData(data);
+        let sum = 0;
+        for (const v of data) sum += v;
+        const avg = sum / data.length;
+        const wasSpeaking = this.speakingUsers.has(userId);
+        const isSpeaking = avg > 18;
+        if (isSpeaking !== wasSpeaking) {
+          if (isSpeaking) this.speakingUsers.add(userId);
+          else this.speakingUsers.delete(userId);
+          this.emit('speaking:changed', { userId, speaking: isSpeaking });
+        }
+        meta.raf = requestAnimationFrame(tick);
+      };
+      this.speakingAnalyzers.set(userId, meta);
+      tick();
+    } catch {}
+  }
+
+  stopSpeakingAnalyzer(userId: string) {
+    const meta = this.speakingAnalyzers.get(userId);
+    if (!meta) return;
+    if (meta.raf) cancelAnimationFrame(meta.raf);
+    try {
+      meta.ac.close();
+    } catch {}
+    this.speakingAnalyzers.delete(userId);
+    if (this.speakingUsers.delete(userId)) {
+      this.emit('speaking:changed', { userId, speaking: false });
+    }
+  }
+
   // Track aktif kalır, hızlı toggle, RTP gönderilmez, sessizlik üretir.
   // Tarayıcı sekme ikonu (Discord web'de de) yanmaya devam eder — bu beklenen.
   setMicrophoneEnabled(enabled: boolean) {
@@ -340,6 +391,8 @@ class VoiceClient {
       el.autoplay = true;
       document.body.appendChild(el);
       this.remoteAudioEls.set(producerId, el);
+      // Speaking indicator için analyser başlat
+      this.startSpeakingAnalyzer(userId, stream);
     }
     this.emit('remotes:changed', {});
     this.emit('consumed', info);
@@ -376,6 +429,7 @@ class VoiceClient {
             this.remotes.delete(pid);
           }
         }
+        this.stopSpeakingAnalyzer(msg.payload.userId);
         this.emit('remotes:changed', {});
         this.emit('peer:left', msg.payload);
         break;

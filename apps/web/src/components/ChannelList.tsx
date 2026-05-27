@@ -144,15 +144,9 @@ export function ChannelList() {
         <ChannelButton channel={ch} active={active} Icon={Icon} connectedCount={connected.length} />
         {ch.type === 'voice' && connected.length > 0 && (
           <ul className="ml-6 mt-0.5 space-y-0.5">
-            {connected.map((uid: string) => {
-              const u = usersById[uid];
-              return (
-                <li key={uid} className="flex items-center gap-2 px-2 py-0.5 text-xs text-ink-secondary">
-                  <span className="w-2 h-2 rounded-full bg-status-online" />
-                  <span className="truncate">{u?.display_name ?? uid}</span>
-                </li>
-              );
-            })}
+            {connected.map((uid: string) => (
+              <VoiceConnectedRow key={uid} userId={uid} user={usersById[uid]} />
+            ))}
           </ul>
         )}
       </li>
@@ -279,6 +273,32 @@ function CategorySection({
         />
       )}
     </section>
+  );
+}
+
+function VoiceConnectedRow({ userId, user }: { userId: string; user: any }) {
+  const [speaking, setSpeaking] = useState(false);
+  useEffect(() => {
+    const { voice } = require('../voice');
+    setSpeaking(voice.speakingSet().has(userId));
+    const onChange = (ev: any) => {
+      if (ev.userId === userId) setSpeaking(ev.speaking);
+    };
+    voice.on('speaking:changed', onChange);
+    return () => voice.off('speaking:changed', onChange);
+  }, [userId]);
+  return (
+    <li className="flex items-center gap-2 px-2 py-0.5 text-xs text-ink-secondary">
+      <span
+        className={
+          'w-2 h-2 rounded-full transition-colors ' +
+          (speaking ? 'bg-status-online ring-2 ring-status-online/40 animate-pulse' : 'bg-status-online')
+        }
+      />
+      <span className={'truncate ' + (speaking ? 'text-status-online font-semibold' : '')}>
+        {user?.display_name ?? userId}
+      </span>
+    </li>
   );
 }
 

@@ -43,8 +43,35 @@ export function ServerRail() {
             Henüz sunucun yok
           </p>
         )}
-        {guilds.map((g) => (
-          <GuildIcon key={g.id} guild={g} active={g.id === selectedId && mode === 'guild'} />
+        {guilds.map((g, idx) => (
+          <div
+            key={g.id}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData('text/sidcord-guild', g.id);
+              e.dataTransfer.effectAllowed = 'move';
+            }}
+            onDragOver={(e) => {
+              if (e.dataTransfer.types.includes('text/sidcord-guild')) e.preventDefault();
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              const draggedId = e.dataTransfer.getData('text/sidcord-guild');
+              if (!draggedId || draggedId === g.id) return;
+              // Sıralamayı localStorage'da tut (backend folder yapısı ile ayrı)
+              try {
+                const order = JSON.parse(localStorage.getItem('sidcord_guild_order') ?? '[]') as string[];
+                const filtered = order.filter((id) => id !== draggedId && guilds.some((x) => x.id === id));
+                const targetIdx = filtered.indexOf(g.id);
+                const insertAt = targetIdx >= 0 ? targetIdx : idx;
+                filtered.splice(insertAt, 0, draggedId);
+                localStorage.setItem('sidcord_guild_order', JSON.stringify(filtered));
+                location.reload();
+              } catch {}
+            }}
+          >
+            <GuildIcon guild={g} active={g.id === selectedId && mode === 'guild'} />
+          </div>
         ))}
       </div>
 
@@ -98,6 +125,7 @@ export function ServerRail() {
 
 function GuildIcon({ guild, active }: { guild: APIGuild; active: boolean }) {
   const dispatch = useAppDispatch();
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   // Bu sunucunun herhangi bir kanalında okunmamış mesaj var mı?
   const { hasUnread, totalMentions } = useAppSelector((s) => {
     const channels = s.channels.byGuild[guild.id] ?? [];
@@ -121,6 +149,10 @@ function GuildIcon({ guild, active }: { guild: APIGuild; active: boolean }) {
     <div className="relative">
       <button
         onClick={() => dispatch(switchToGuild(guild.id))}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setMenu({ x: e.clientX, y: e.clientY });
+        }}
         title={guild.name}
         className={clsx(
           'relative w-12 h-12 rounded-xl flex items-center justify-center font-bold text-white text-[15px] tracking-tight transition-all duration-200 overflow-hidden',
@@ -148,6 +180,80 @@ function GuildIcon({ guild, active }: { guild: APIGuild; active: boolean }) {
           {totalMentions > 99 ? '99+' : totalMentions}
         </span>
       )}
+      {menu && <GuildContextMenu guild={guild} x={menu.x} y={menu.y} onClose={() => setMenu(null)} />}
+    </div>
+  );
+}
+
+function GuildContextMenu({
+  guild,
+  x,
+  y,
+  onClose,
+}: {
+  guild: APIGuild;
+  x: number;
+  y: number;
+  onClose: () => void;
+}) {
+  const dispatch = useAppDispatch();
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function h(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    }
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [onClose]);
+  const w = 220;
+  let left = x;
+  let top = y;
+  if (left + w > window.innerWidth) left = window.innerWidth - w - 8;
+  if (top + 200 > window.innerHeight) top = window.innerHeight - 200 - 8;
+  async function leave() {
+    if (!confirm(`${guild.name} sunucusundan ayrılmak istiyor musun?`)) return;
+    try {
+      await fetch(`/api/v1/guilds/${guild.id}/leave`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + localStorage.getItem('sidcord_access') },
+      });
+      location.reload();
+    } catch {}
+    onClose();
+  }
+  return (
+    <div className="fixed inset-0 z-50 pointer-events-none">
+      <div
+        ref={ref}
+        style={{ left, top, width: w }}
+        className="absolute bg-surface-1 border border-line rounded-xl shadow-2xl p-1 pointer-events-auto ring-1 ring-white/5"
+      >
+        <button
+          onClick={() => {
+            dispatch(openModal('invite_link'));
+            onClose();
+          }}
+          className="w-full text-left px-3 py-2 rounded-lg text-sm text-ink-primary hover:bg-surface-2"
+        >
+          Arkadaşlarını Davet Et
+        </button>
+        <button
+          onClick={() => {
+            dispatch(openModal('server_settings'));
+            onClose();
+          }}
+          className="w-full text-left px-3 py-2 rounded-lg text-sm text-ink-primary hover:bg-surface-2"
+        >
+          Sunucu Ayarları
+        </button>
+        <div className="my-1 h-px bg-line" />
+        <button
+          onClick={leave}
+          className="w-full text-left px-3 py-2 rounded-lg text-sm text-accent-500 hover:bg-accent-500/10"
+        >
+          Sunucudan Ayrıl
+        </button>
+      </div>
     </div>
   );
 }

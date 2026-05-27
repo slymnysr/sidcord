@@ -15,7 +15,10 @@ type Node =
   | { kind: 'blockquote'; children: Node[] }
   | { kind: 'spoiler'; children: Node[] }
   | { kind: 'link'; href: string }
-  | { kind: 'mention'; username: string };
+  | { kind: 'mention'; username: string }
+  | { kind: 'user_mention'; userId: string }
+  | { kind: 'channel_mention'; channelId: string }
+  | { kind: 'everyone' };
 
 // inline parser — recursive
 function parseInline(src: string): Node[] {
@@ -82,6 +85,26 @@ function parseInline(src: string): Node[] {
         i = end + 1;
         continue;
       }
+    }
+    // <@id> kullanıcı mention (backend formatı)
+    const userMention = src.slice(i).match(/^<@(\d{10,20})>/);
+    if (userMention) {
+      out.push({ kind: 'user_mention', userId: userMention[1] });
+      i += userMention[0].length;
+      continue;
+    }
+    // <#id> kanal mention (backend formatı)
+    const channelMention = src.slice(i).match(/^<#(\d{10,20})>/);
+    if (channelMention) {
+      out.push({ kind: 'channel_mention', channelId: channelMention[1] });
+      i += channelMention[0].length;
+      continue;
+    }
+    // @everyone / @here
+    if (src.startsWith('@everyone', i) || src.startsWith('@here', i)) {
+      out.push({ kind: 'everyone' });
+      i += src.startsWith('@everyone', i) ? '@everyone'.length : '@here'.length;
+      continue;
     }
     // Mention @username
     const mention = src.slice(i).match(/^@([a-z0-9_.]{3,32})/i);
@@ -219,7 +242,63 @@ function renderNode(n: Node, key: number, openMention?: (u: string) => void): Re
           @{n.username}
         </button>
       );
+    case 'user_mention':
+      return <UserMentionChip key={key} userId={n.userId} />;
+    case 'channel_mention':
+      return <ChannelMentionChip key={key} channelId={n.channelId} />;
+    case 'everyone':
+      return (
+        <span
+          key={key}
+          className="bg-accent-500/15 text-accent-500 font-semibold rounded px-1 py-0.5"
+        >
+          @everyone
+        </span>
+      );
   }
+}
+
+function UserMentionChip({ userId }: { userId: string }) {
+  const user = useUserCache(userId);
+  return (
+    <button
+      type="button"
+      className="bg-brand-500/15 text-brand-500 font-semibold rounded px-1 py-0.5 hover:bg-brand-500/25"
+      title={user ? `@${user.username}` : userId}
+    >
+      @{user?.display_name ?? '…'}
+    </button>
+  );
+}
+
+function ChannelMentionChip({ channelId }: { channelId: string }) {
+  const ch = useChannelCache(channelId);
+  return (
+    <button
+      type="button"
+      className="bg-brand-500/15 text-brand-500 font-semibold rounded px-1 py-0.5 hover:bg-brand-500/25"
+    >
+      #{ch?.name ?? '…'}
+    </button>
+  );
+}
+
+function useUserCache(userId: string) {
+  // Lazy: store'dan oku, yoksa fetch et
+  const store = (window as any).__sidcord_store;
+  const cached = store?.getState?.()?.users?.byId?.[userId];
+  return cached ?? null;
+}
+
+function useChannelCache(channelId: string) {
+  const store = (window as any).__sidcord_store;
+  const state = store?.getState?.();
+  if (!state) return null;
+  for (const guildId in state.channels?.byGuild ?? {}) {
+    const found = state.channels.byGuild[guildId].find((c: any) => c.id === channelId);
+    if (found) return found;
+  }
+  return null;
 }
 
 function Spoiler({

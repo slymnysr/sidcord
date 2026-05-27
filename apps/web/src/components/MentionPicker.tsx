@@ -1,9 +1,10 @@
-import { useEffect, useMemo } from 'react';
-import { Hash, Volume2, AtSign } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Hash, Volume2, AtSign, Slash } from 'lucide-react';
 import { useAppSelector } from '../store';
+import { api } from '../api';
 
 interface Props {
-  type: '@' | '#';
+  type: '@' | '#' | ':' | '/';
   query: string;
   onPick: (text: string) => void;
   onClose: () => void;
@@ -13,6 +14,14 @@ export function MentionPicker({ type, query, onPick, onClose }: Props) {
   const guildId = useAppSelector((s) => s.guilds.selectedId);
   const members = useAppSelector((s) => (guildId ? s.members.byGuild[guildId] ?? [] : []));
   const channels = useAppSelector((s) => (guildId ? s.channels.byGuild[guildId] ?? [] : []));
+  const [emojis, setEmojis] = useState<Awaited<ReturnType<typeof api.emojis.list>>>([]);
+  const [commands, setCommands] = useState<Awaited<ReturnType<typeof api.commands.list>>>([]);
+
+  useEffect(() => {
+    if (!guildId) return;
+    if (type === ':') api.emojis.list(guildId).then(setEmojis).catch(() => {});
+    if (type === '/') api.commands.list(guildId).then(setCommands).catch(() => {});
+  }, [type, guildId]);
 
   const items = useMemo(() => {
     const q = query.toLowerCase();
@@ -28,6 +37,27 @@ export function MentionPicker({ type, query, onPick, onClose }: Props) {
         replacement: `<@${m.user_id}>`,
       }));
     }
+    if (type === ':') {
+      const matches = emojis.filter((e) => e.name.toLowerCase().includes(q)).slice(0, 10);
+      return matches.map((e) => ({
+        key: e.id,
+        label: ':' + e.name + ':',
+        sub: 'özel emoji',
+        color: '#5865F2',
+        replacement: `<:${e.name}:${e.id}>`,
+        imageUrl: e.url,
+      }));
+    }
+    if (type === '/') {
+      const matches = commands.filter((c) => c.name.toLowerCase().includes(q)).slice(0, 10);
+      return matches.map((c) => ({
+        key: c.id,
+        label: '/' + c.name,
+        sub: c.description,
+        color: '#5865F2',
+        replacement: '/' + c.name,
+      }));
+    }
     const cs = channels
       .filter((c) => c.type !== 'category' && c.name.toLowerCase().includes(q))
       .slice(0, 8);
@@ -38,7 +68,7 @@ export function MentionPicker({ type, query, onPick, onClose }: Props) {
       color: c.type === 'voice' ? '#7C7CDD' : '#5865F2',
       replacement: `<#${c.id}>`,
     }));
-  }, [type, query, members, channels]);
+  }, [type, query, members, channels, emojis, commands]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -55,8 +85,16 @@ export function MentionPicker({ type, query, onPick, onClose }: Props) {
   return (
     <div className="absolute bottom-full left-2 right-2 mb-1 bg-surface-1 border border-line rounded-xl shadow-2xl max-h-60 overflow-y-auto z-10">
       <div className="text-[10px] font-bold uppercase text-ink-tertiary tracking-wider px-3 py-2 border-b border-line flex items-center gap-1.5">
-        {type === '@' ? <AtSign size={12} /> : <Hash size={12} />}
-        {type === '@' ? 'Üyeler' : 'Kanallar'}
+        {type === '@' ? (
+          <AtSign size={12} />
+        ) : type === '#' ? (
+          <Hash size={12} />
+        ) : type === '/' ? (
+          <Slash size={12} />
+        ) : (
+          <span>:</span>
+        )}
+        {type === '@' ? 'Üyeler' : type === '#' ? 'Kanallar' : type === ':' ? 'Emojiler' : 'Komutlar'}
         <span className="text-ink-muted">— {items.length} sonuç</span>
       </div>
       <ul>
@@ -77,6 +115,10 @@ export function MentionPicker({ type, query, onPick, onClose }: Props) {
                 >
                   {it.label.slice(0, 1).toUpperCase()}
                 </div>
+              ) : type === ':' && (it as any).imageUrl ? (
+                <img src={(it as any).imageUrl} alt="" className="w-6 h-6 object-contain shrink-0" />
+              ) : type === '/' ? (
+                <Slash size={14} className="text-ink-tertiary shrink-0" />
               ) : (
                 <span className="w-6 h-6 flex items-center justify-center shrink-0">
                   {it.sub === 'sesli' ? (
