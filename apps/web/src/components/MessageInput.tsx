@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Paperclip, Send, X, FileIcon, Smile, AtSign } from 'lucide-react';
+import { Paperclip, Send, X, FileIcon, Smile, AtSign, Sticker } from 'lucide-react';
 import { api } from '../api';
 import { useAppDispatch, useAppSelector, setReplyTo } from '../store';
 import { sendTyping } from '../gateway';
@@ -31,6 +31,8 @@ export function MessageInput() {
   const [files, setFiles] = useState<PendingFile[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [stickerOpen, setStickerOpen] = useState(false);
+  const [stickers, setStickers] = useState<Awaited<ReturnType<typeof api.stickers.list>>>([]);
   const [mention, setMention] = useState<{ type: '@' | '#'; q: string; start: number } | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -48,6 +50,24 @@ export function MessageInput() {
     setFiles([]);
     ref.current?.focus();
   }, [channelId]);
+
+  useEffect(() => {
+    if (!guildId || !stickerOpen) return;
+    api.stickers.list(guildId).then(setStickers).catch(() => {});
+  }, [stickerOpen, guildId]);
+
+  async function sendSticker(url: string, name: string) {
+    if (!channelId) return;
+    setStickerOpen(false);
+    try {
+      const msg = await api.channels.sendMessage(channelId, ' ', [
+        { url, filename: name + '.png', content_type: 'image/png', size_bytes: 0 },
+      ]);
+      dispatch({ type: 'messages/send/fulfilled', payload: msg, meta: { arg: { channelId, content: ' ' } } });
+    } catch (e) {
+      console.warn('sticker send', e);
+    }
+  }
 
   if (!channel) return null;
 
@@ -302,6 +322,47 @@ export function MessageInput() {
           >
             <AtSign size={18} />
           </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setStickerOpen((v) => !v)}
+              className="text-ink-secondary hover:text-brand-500 transition-colors shrink-0"
+              title="Sticker"
+            >
+              <Sticker size={20} />
+            </button>
+            {stickerOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setStickerOpen(false)} />
+                <div className="absolute bottom-9 right-0 z-20 w-72 max-h-[400px] bg-surface-1 border border-line rounded-xl shadow-2xl p-3 overflow-y-auto">
+                  <div className="text-[10px] font-bold uppercase text-ink-tertiary tracking-wider mb-2">
+                    Bu Sunucu — {stickers.length}
+                  </div>
+                  {stickers.length === 0 ? (
+                    <p className="text-xs text-ink-tertiary py-6 text-center">
+                      Henüz sticker yok. Sunucu Ayarları &gt; Etiketler'den ekle.
+                    </p>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-2">
+                      {stickers.map((s) => (
+                        <button
+                          key={s.id}
+                          onClick={() => sendSticker(s.url, s.name)}
+                          title={s.name}
+                          className="aspect-square bg-surface-2 hover:bg-surface-3 rounded-lg p-2 flex flex-col items-center gap-1"
+                        >
+                          <img src={s.url} alt={s.name} className="w-14 h-14 object-contain" />
+                          <span className="text-[10px] truncate w-full text-center text-ink-secondary">
+                            {s.name}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
           <div className="relative">
             <button
               type="button"

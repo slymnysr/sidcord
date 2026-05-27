@@ -29,6 +29,8 @@ import {
   pruneTyping,
   openProfileCard,
   openModal,
+  fetchReadStates,
+  ackChannel,
 } from './store';
 import { tokenStore } from './api';
 import { connectGateway, joinGuild, joinUser, disconnectGateway, onGuildEvent } from './gateway';
@@ -57,10 +59,11 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Login sonrası guild'leri çek + user kanalına abone ol
+  // Login sonrası guild'leri çek + user kanalına abone ol + read states
   useEffect(() => {
     if (user) {
       dispatch(fetchGuilds());
+      dispatch(fetchReadStates());
       connectGateway();
       joinUser(user.id, {
         onDMMessage: (event: any) => {
@@ -129,11 +132,21 @@ export default function App() {
     };
   }, [guildId, dispatch]);
 
-  // Kanal seçiminde mesajları çek
+  // Kanal seçiminde mesajları çek + ACK (okundu işaretle)
+  const lastMsgId = useAppSelector((s) => {
+    if (!channelId) return null;
+    const list = s.messages.byChannel[channelId];
+    return list && list.length > 0 ? list[list.length - 1].id : null;
+  });
   useEffect(() => {
     if (!channelId) return;
     dispatch(fetchMessages(channelId));
   }, [channelId, dispatch]);
+  useEffect(() => {
+    if (channelId && lastMsgId) {
+      dispatch(ackChannel({ channelId, lastMessageId: lastMsgId }));
+    }
+  }, [channelId, lastMsgId, dispatch]);
 
   if (bootChecking) {
     return (

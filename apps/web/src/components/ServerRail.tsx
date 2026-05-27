@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import clsx from 'clsx';
 import { Plus, Compass } from 'lucide-react';
 import { useAppDispatch, useAppSelector, openModal, switchToDM, switchToGuild } from '../store';
+import type { APIGuild } from '../api';
 
 export function ServerRail() {
   const guilds = useAppSelector((s) => s.guilds.list);
@@ -42,28 +43,9 @@ export function ServerRail() {
             Henüz sunucun yok
           </p>
         )}
-        {guilds.map((g) => {
-          const active = g.id === selectedId && mode === 'guild';
-          return (
-            <button
-              key={g.id}
-              onClick={() => dispatch(switchToGuild(g.id))}
-              title={g.name}
-              className={clsx(
-                'relative w-12 h-12 rounded-xl flex items-center justify-center font-bold text-white text-[15px] tracking-tight transition-all duration-200',
-                active
-                  ? 'ring-2 ring-brand-500 ring-offset-2 ring-offset-bg shadow-glow scale-105'
-                  : 'opacity-85 hover:opacity-100 hover:scale-105',
-              )}
-              style={{ backgroundColor: g.icon_color }}
-            >
-              {g.icon_text}
-              {active && (
-                <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-brand-500" />
-              )}
-            </button>
-          );
-        })}
+        {guilds.map((g) => (
+          <GuildIcon key={g.id} guild={g} active={g.id === selectedId && mode === 'guild'} />
+        ))}
       </div>
 
       <div className="flex flex-col gap-2 items-center relative" ref={menuRef}>
@@ -111,5 +93,57 @@ export function ServerRail() {
         </button>
       </div>
     </aside>
+  );
+}
+
+function GuildIcon({ guild, active }: { guild: APIGuild; active: boolean }) {
+  const dispatch = useAppDispatch();
+  // Bu sunucunun herhangi bir kanalında okunmamış mesaj var mı?
+  const { hasUnread, totalMentions } = useAppSelector((s) => {
+    const channels = s.channels.byGuild[guild.id] ?? [];
+    let unread = false;
+    let mentions = 0;
+    for (const ch of channels) {
+      if (ch.type === 'category') continue;
+      const rs = s.readStates.byChannel[ch.id];
+      mentions += rs?.mention_count ?? 0;
+      if (
+        ch.last_message_id &&
+        (!rs?.last_message_id || rs.last_message_id < ch.last_message_id)
+      ) {
+        unread = true;
+      }
+    }
+    return { hasUnread: unread, totalMentions: mentions };
+  });
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => dispatch(switchToGuild(guild.id))}
+        title={guild.name}
+        className={clsx(
+          'relative w-12 h-12 rounded-xl flex items-center justify-center font-bold text-white text-[15px] tracking-tight transition-all duration-200',
+          active
+            ? 'ring-2 ring-brand-500 ring-offset-2 ring-offset-bg shadow-glow scale-105'
+            : 'opacity-85 hover:opacity-100 hover:scale-105',
+        )}
+        style={{ backgroundColor: guild.icon_color }}
+      >
+        {guild.icon_text}
+        {active && (
+          <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full bg-brand-500" />
+        )}
+      </button>
+      {/* Okunmamış göstergesi: sol kenarda beyaz dik bar, mention varsa kırmızı sayı */}
+      {!active && hasUnread && (
+        <span className="absolute left-[-12px] top-1/2 -translate-y-1/2 w-1 h-2 rounded-r-full bg-ink-primary" />
+      )}
+      {totalMentions > 0 && (
+        <span className="absolute -bottom-0.5 -right-0.5 min-w-[18px] h-[18px] px-1.5 rounded-full bg-accent-500 text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-bg">
+          {totalMentions > 99 ? '99+' : totalMentions}
+        </span>
+      )}
+    </div>
   );
 }

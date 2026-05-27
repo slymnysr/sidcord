@@ -1,6 +1,6 @@
 import { configureStore, createSlice, createAsyncThunk, type PayloadAction } from '@reduxjs/toolkit';
 import { useDispatch, useSelector, type TypedUseSelectorHook } from 'react-redux';
-import { api, type APIUser, type APIGuild, type APIChannel, type APIMessage, type APIMember, type APIReaction } from './api';
+import { api, type APIUser, type APIGuild, type APIChannel, type APIMessage, type APIMember, type APIReaction, type APIReadState } from './api';
 
 // ===== AUTH =====
 interface AuthState {
@@ -368,6 +368,58 @@ const typingSlice = createSlice({
   },
 });
 
+// ===== READ STATES =====
+interface ReadStatesState {
+  byChannel: Record<string, APIReadState>;
+}
+
+export const fetchReadStates = createAsyncThunk('readStates/list', async () => {
+  return await api.readStates.list();
+});
+
+export const ackChannel = createAsyncThunk(
+  'readStates/ack',
+  async (input: { channelId: string; lastMessageId: string }) => {
+    await api.readStates.ack(input.channelId, input.lastMessageId);
+    return input;
+  },
+);
+
+const readStatesSlice = createSlice({
+  name: 'readStates',
+  initialState: { byChannel: {} } as ReadStatesState,
+  reducers: {
+    bumpRead(state, action: PayloadAction<{ channelId: string; lastMessageId: string }>) {
+      const cur = state.byChannel[action.payload.channelId] ?? {
+        channel_id: action.payload.channelId,
+        mention_count: 0,
+        last_read_at: new Date().toISOString(),
+      };
+      state.byChannel[action.payload.channelId] = {
+        ...cur,
+        last_message_id: action.payload.lastMessageId,
+        mention_count: 0,
+        last_read_at: new Date().toISOString(),
+      };
+    },
+  },
+  extraReducers: (b) => {
+    b.addCase(fetchReadStates.fulfilled, (s, a) => {
+      const next: Record<string, APIReadState> = {};
+      for (const rs of a.payload) next[rs.channel_id] = rs;
+      s.byChannel = next;
+    }).addCase(ackChannel.fulfilled, (s, a) => {
+      const cur = s.byChannel[a.payload.channelId];
+      s.byChannel[a.payload.channelId] = {
+        ...(cur ?? { channel_id: a.payload.channelId, mention_count: 0, last_read_at: new Date().toISOString() }),
+        last_message_id: a.payload.lastMessageId,
+        mention_count: 0,
+        last_read_at: new Date().toISOString(),
+      };
+    });
+  },
+});
+
 // ===== UI =====
 interface UiState {
   showMemberList: boolean;
@@ -467,6 +519,7 @@ export const { upsertUser } = usersSlice.actions;
 export const { setGuildPresence } = presenceSlice.actions;
 export const { setTyping, pruneTyping } = typingSlice.actions;
 export const { toggleMemberList, openModal, closeModal, setMode, selectDM, openProfileCard, setPendingDM, openEditChannel, openChannelPerms, setReplyTo } = uiSlice.actions;
+export const { bumpRead } = readStatesSlice.actions;
 
 // === Mode switching thunks ===
 // DM moduna geçince çalışan kanalı temizle/son DM'i geri yükle.
@@ -516,6 +569,7 @@ export const store = configureStore({
     users: usersSlice.reducer,
     presence: presenceSlice.reducer,
     typing: typingSlice.reducer,
+    readStates: readStatesSlice.reducer,
     ui: uiSlice.reducer,
   },
 });

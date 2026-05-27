@@ -142,6 +142,8 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "mesaj kaydedilemedi")
 		return
 	}
+	// Kanalın last_message_id'sini güncelle (unread badge için)
+	_, _ = h.Pool.Exec(r.Context(), `UPDATE channels SET last_message_id = $1 WHERE id = $2`, m.ID, channelID)
 
 	// Attachment'ları ekle
 	for _, a := range req.Attachments {

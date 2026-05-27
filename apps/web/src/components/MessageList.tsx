@@ -122,6 +122,7 @@ export function MessageList() {
               content={m.content}
               attachments={m.attachments ?? []}
               grouped={grouped}
+              repliedToId={m.replied_to_id}
             />
           );
         })}
@@ -169,6 +170,7 @@ function MessageItem({
   content,
   attachments,
   grouped,
+  repliedToId,
 }: {
   messageId: string;
   authorId: string;
@@ -180,11 +182,20 @@ function MessageItem({
   content: string;
   attachments: APIAttachment[];
   grouped: boolean;
+  repliedToId?: string;
 }) {
   const dispatch = useAppDispatch();
   const me = useAppSelector((s) => s.auth.user);
   const channelId = useAppSelector((s) => s.channels.selectedId);
   const reactions = useAppSelector((s) => s.reactions.byMessage[messageId] ?? []);
+  const repliedTo = useAppSelector((s) =>
+    repliedToId && channelId
+      ? s.messages.byChannel[channelId]?.find((m) => m.id === repliedToId)
+      : null,
+  );
+  const repliedAuthor = useAppSelector((s) =>
+    repliedTo ? s.users.byId[repliedTo.author_id] : null,
+  );
   const [pickerOpen, setPickerOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(content);
@@ -259,7 +270,23 @@ function MessageItem({
   }
 
   return (
-    <li className="flex gap-3 group relative px-2 -mx-2 py-1 hover:bg-surface-1/40 rounded">
+    <li className="group relative px-2 -mx-2 py-1 hover:bg-surface-1/40 rounded">
+      {repliedTo && (
+        <div className="flex items-center gap-1.5 text-xs text-ink-tertiary mb-1 pl-12 truncate">
+          <span className="w-6 h-3 border-l-2 border-t-2 border-line rounded-tl-md inline-block ml-[-22px] shrink-0" />
+          <span
+            className="w-4 h-4 rounded-full flex items-center justify-center text-white text-[8px] font-bold shrink-0"
+            style={{ backgroundColor: repliedAuthor?.avatar_color ?? '#6B7280' }}
+          >
+            {(repliedAuthor?.display_name ?? '?').slice(0, 1).toUpperCase()}
+          </span>
+          <span className="font-semibold text-ink-secondary">
+            @{repliedAuthor?.display_name ?? '...'}
+          </span>
+          <span className="text-ink-tertiary truncate">{repliedTo.content || '<dosya>'}</span>
+        </div>
+      )}
+      <div className="flex gap-3">
       {!grouped ? (
         <button
           onClick={(e) => {
@@ -437,6 +464,7 @@ function MessageItem({
           ))}
         </div>
       )}
+      </div>
     </li>
   );
 }

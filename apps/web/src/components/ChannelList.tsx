@@ -295,6 +295,12 @@ function ChannelButton({
 }) {
   const dispatch = useAppDispatch();
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const readState = useAppSelector((s) => s.readStates.byChannel[channel.id]);
+  const unread =
+    !active &&
+    channel.last_message_id &&
+    (!readState?.last_message_id || readState.last_message_id < channel.last_message_id);
+  const mentionCount = readState?.mention_count ?? 0;
 
   function onContextMenu(e: React.MouseEvent) {
     e.preventDefault();
@@ -307,16 +313,28 @@ function ChannelButton({
         onClick={() => dispatch(selectChannel(channel.id))}
         onContextMenu={onContextMenu}
         className={clsx(
-          'w-full text-left pl-3 pr-2 py-1.5 rounded-md flex items-center gap-2 transition-colors',
+          'w-full text-left pl-3 pr-2 py-1.5 rounded-md flex items-center gap-2 transition-colors relative',
           active
             ? 'bg-brand-500/10 text-ink-primary'
-            : 'text-ink-secondary hover:bg-surface-2 hover:text-ink-primary',
+            : unread
+              ? 'text-ink-primary hover:bg-surface-2'
+              : 'text-ink-secondary hover:bg-surface-2 hover:text-ink-primary',
         )}
       >
+        {unread && !active && (
+          <span className="absolute -left-0.5 top-1/2 -translate-y-1/2 w-1 h-2 rounded-r-full bg-ink-primary" />
+        )}
         <Icon size={16} className={active ? 'text-brand-500' : 'text-ink-tertiary'} />
-        <span className="text-sm truncate font-medium">{channel.name}</span>
+        <span className={clsx('text-sm truncate', unread ? 'font-semibold' : 'font-medium')}>
+          {channel.name}
+        </span>
         {channel.type === 'voice' && connectedCount > 0 && (
           <span className="ml-auto text-[10px] text-brand-500 font-semibold">{connectedCount}</span>
+        )}
+        {mentionCount > 0 && (
+          <span className="ml-auto min-w-[18px] h-[18px] px-1.5 rounded-full bg-accent-500 text-white text-[10px] font-bold flex items-center justify-center">
+            {mentionCount > 99 ? '99+' : mentionCount}
+          </span>
         )}
       </button>
       {menu && (

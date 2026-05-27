@@ -38,7 +38,15 @@ export interface APIChannel {
   position: number;
   nsfw: boolean;
   rate_limit_sec: number;
+  last_message_id?: Snowflake;
   created_at: string;
+}
+
+export interface APIReadState {
+  channel_id: Snowflake;
+  last_message_id?: Snowflake;
+  mention_count: number;
+  last_read_at: string;
 }
 
 export interface APIAttachment {
@@ -59,6 +67,8 @@ export interface APIMessage {
   edited_at?: string;
   created_at: string;
   attachments?: APIAttachment[];
+  replied_to_id?: Snowflake;
+  mention_everyone?: boolean;
 }
 
 export interface APIMember {
@@ -550,6 +560,15 @@ export const api = {
       ),
     delete: (channelId: string) =>
       request<void>(`/stage-instances/${channelId}`, { method: 'DELETE' }),
+  },
+
+  readStates: {
+    list: () => request<APIReadState[]>('/users/me/read-states'),
+    ack: (channelId: string, lastMessageId: string) =>
+      request<void>(`/channels/${channelId}/ack`, {
+        method: 'POST',
+        body: JSON.stringify({ last_message_id: lastMessageId }),
+      }),
   },
 
   friends: {
