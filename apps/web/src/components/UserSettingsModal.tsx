@@ -1276,8 +1276,20 @@ function VoiceTab() {
       <div className="bg-surface-2 rounded-xl border border-line p-4 space-y-1">
         <h3 className="text-sm font-bold text-ink-primary mb-2">Ses İşleme</h3>
         <AudioToggle storageKey="sidcord_echo_cancel" label="Yankı engelleme" desc="Hoparlör sesinin mikrofona geri dönmesini önler" />
-        <AudioToggle storageKey="sidcord_noise_suppress" label="Gürültü engelleme" desc="Arka plan gürültüsünü bastırır" />
+        <AudioToggle storageKey="sidcord_noise_suppress" label="Gürültü engelleme" desc="Arka plan gürültüsünü bastırır (tarayıcı yerleşik)" />
+        <AudioToggle
+          storageKey="sidcord_rnnoise"
+          label="🤖 Gelişmiş gürültü engelleme (RNNoise)"
+          desc="Yapay zekâ tabanlı — klavye/fan gibi gürültüleri çok daha iyi temizler, cihazında çalışır"
+          defaultOn={false}
+        />
         <AudioToggle storageKey="sidcord_auto_gain" label="Otomatik kazanç" desc="Mikrofon seviyesini otomatik dengeler" />
+        <AudioToggle
+          storageKey="sidcord_music_mode"
+          label="🎵 Müzik modu"
+          desc="Stereo + yüksek bitrate; tüm ses işleme kapatılır (enstrüman/müzik paylaşımı için)"
+          defaultOn={false}
+        />
         <p className="text-[11px] text-ink-tertiary pt-1">Değişiklikler bir sonraki ses kanalına katılışta uygulanır.</p>
       </div>
 

@@ -191,3 +191,14 @@ MD'lerden bağımsız tam kod denetimi yapıldı; aşağıdaki eksikler bulunup 
 | DM araması (backend vardı, UI bağlı değildi) | ✅ SearchModal DM modu |
 
 **Bilinçli kapsam dışı (niş):** TTS mesajları, sunucu şablonları, üye prune, OAuth2 provider ("Sidcord ile giriş"), otomatik oyun algılama (masaüstü uygulamasına), video simulcast.
+
+## 4. KALİTE TURU (2026-06-11) — motorların tam kapasitesi
+
+| İş | Durum |
+|---|---|
+| mediasoup çoklu worker (CPU başına; önceden tek çekirdek) | ✅ |
+| AV1/VP9 codec'leri + cihaza göre otomatik seçim | ✅ |
+| Simulcast/SVC (zayıf ağda otomatik katman düşürme) | ✅ |
+| Opus FEC (paket kaybı direnci) | ✅ |
+| 🎵 Müzik modu (stereo, 128k+, işleme kapalı) | ✅ |
+| 🤖 RNNoise gelişmiş gürültü engelleme (WASM) | ✅ |

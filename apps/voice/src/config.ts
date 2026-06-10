@@ -24,6 +24,19 @@ export const config = {
         clockRate: 48000,
         channels: 2,
       },
+      // Modern codec'ler önde: AV1 (aynı bantta en iyi görüntü) → VP9 (SVC) → VP8/H264 (uyumluluk)
+      {
+        kind: 'video',
+        mimeType: 'video/AV1',
+        clockRate: 90000,
+        parameters: {},
+      },
+      {
+        kind: 'video',
+        mimeType: 'video/VP9',
+        clockRate: 90000,
+        parameters: { 'profile-id': 2, 'x-google-start-bitrate': 1000 },
+      },
       {
         kind: 'video',
         mimeType: 'video/VP8',

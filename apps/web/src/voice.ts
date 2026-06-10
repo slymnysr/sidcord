@@ -4,6 +4,7 @@ import { Device, types as msTypes } from 'mediasoup-client';
 import { tokenStore } from './api';
 import { wsUrl } from './serverConfig';
 import { isBlurEnabled, createBlurredTrack, type BlurredTrack } from './videoEffects';
+import { isMusicMode, isRnnoiseEnabled, createNoiseSuppressedTrack, type SuppressedTrack } from './audioEffects';
 
 type Handler = (m: any) => void;
 type RequestPending = { resolve: (v: any) => void; reject: (e: any) => void };
@@ -42,6 +43,7 @@ class VoiceClient {
   private micStream: MediaStream | null = null;
   private cameraStream: MediaStream | null = null;
   private cameraEffect: BlurredTrack | null = null;
+  private micEffect: SuppressedTrack | null = null;
   private channelAudioBitrate = 64000;
   private screenAudioProducer: msTypes.Producer | null = null;
   // Kullanıcı bazlı bekleyen ekran sesi (ekran izlenmeye başlayınca consume edilir)
@@ -279,12 +281,21 @@ class VoiceClient {
 
     // Mikrofonu otomatik aç (kullanıcının seçtiği input cihazıyla)
     const inputId = localStorage.getItem('sidcord_input_device');
-    // Kullanıcı ayarları (varsayılan açık) — VoiceTab'dan kontrol edilir
-    const audioConstraints: MediaTrackConstraints = {
-      echoCancellation: localStorage.getItem('sidcord_echo_cancel') !== '0',
-      noiseSuppression: localStorage.getItem('sidcord_noise_suppress') !== '0',
-      autoGainControl: localStorage.getItem('sidcord_auto_gain') !== '0',
-    };
+    const musicMode = isMusicMode();
+    // Kullanıcı ayarları (varsayılan açık) — VoiceTab'dan kontrol edilir.
+    // Müzik modunda tüm ses işleme kapatılır (enstrüman/müzik sesini bozar) + stereo.
+    const audioConstraints: MediaTrackConstraints = musicMode
+      ? {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          channelCount: { ideal: 2 },
+        }
+      : {
+          echoCancellation: localStorage.getItem('sidcord_echo_cancel') !== '0',
+          noiseSuppression: localStorage.getItem('sidcord_noise_suppress') !== '0',
+          autoGainControl: localStorage.getItem('sidcord_auto_gain') !== '0',
+        };
     if (inputId && inputId !== 'default') {
       audioConstraints.deviceId = { exact: inputId };
     }
@@ -293,14 +304,32 @@ class VoiceClient {
       video: false,
     });
     const audioTrack = this.micStream.getAudioTracks()[0];
+
+    // Gelişmiş gürültü engelleme (RNNoise) — producer'a temizlenmiş track gider,
+    // ham track (PTT/mute/konuşma analizi) olduğu gibi kalır. Müzik modunda devre dışı.
+    let producerTrack = audioTrack;
+    if (!musicMode && isRnnoiseEnabled()) {
+      try {
+        this.micEffect = await createNoiseSuppressedTrack(audioTrack);
+        producerTrack = this.micEffect.track;
+      } catch (e) {
+        console.warn('RNNoise başlatılamadı, ham mikrofonla devam:', e);
+        this.micEffect = null;
+      }
+    }
+
     this.audioProducer = await this.sendTransport!.produce({
-      track: audioTrack,
+      track: producerTrack,
       appData: { source: 'mic' },
-      // Kanal ayarındaki ses bitrate'i (join yanıtından) — opus encoder hedefi
+      // Kanal ayarındaki ses bitrate'i (join yanıtından) — opus encoder hedefi.
+      // opusFec: paket kaybında ses kopmasını ciddi azaltır (in-band forward error correction).
       codecOptions: {
-        opusMaxAverageBitrate: this.channelAudioBitrate,
-        opusStereo: false,
-        opusDtx: true,
+        opusMaxAverageBitrate: musicMode
+          ? Math.max(this.channelAudioBitrate, 128000)
+          : this.channelAudioBitrate,
+        opusStereo: musicMode,
+        opusDtx: !musicMode,
+        opusFec: true,
       },
     });
     this.producerSource.set(this.audioProducer.id, 'mic');
@@ -337,6 +366,32 @@ class VoiceClient {
     this.emit('connected', { channelId });
   }
 
+  // Cihazın desteklediği en modern video codec'i: AV1 > VP9 (> default VP8)
+  private pickVideoCodec(): any | undefined {
+    const codecs = (this.device?.rtpCapabilities?.codecs ?? []) as any[];
+    for (const mime of ['video/AV1', 'video/VP9']) {
+      const c = codecs.find((x) => String(x.mimeType).toLowerCase() === mime.toLowerCase());
+      if (c) return c;
+    }
+    return undefined;
+  }
+
+  // Katmanlı yayın: AV1/VP9'da SVC (tek encoding, scalabilityMode), VP8/H264'te klasik
+  // 3 katmanlı simulcast. Zayıf ağdaki izleyiciye SFU otomatik düşük katman gönderir.
+  private videoEncodings(codecMime: string | undefined, maxBitrate: number, kind: 'camera' | 'screen') {
+    const svc = codecMime && /av1|vp9/i.test(codecMime);
+    if (svc) {
+      // Ekranda spatial katman maliyetli ve metin keskinliğini bozar → yalnız temporal
+      const mode = kind === 'screen' ? 'L1T3' : 'L3T3';
+      return [{ scalabilityMode: mode, maxBitrate }];
+    }
+    return [
+      { rid: 'r0', scaleResolutionDownBy: 4, maxBitrate: Math.max(120_000, Math.round(maxBitrate / 8)) },
+      { rid: 'r1', scaleResolutionDownBy: 2, maxBitrate: Math.round(maxBitrate / 3) },
+      { rid: 'r2', scaleResolutionDownBy: 1, maxBitrate },
+    ];
+  }
+
   async publishCamera(): Promise<MediaStream> {
     if (!this.sendTransport) throw new Error('not connected');
     if (this.cameraStream) return this.cameraStream;
@@ -366,9 +421,13 @@ class VoiceClient {
         this.cameraEffect = null;
       }
     }
+    track.contentHint = 'motion';
+    const camCodec = this.pickVideoCodec();
     this.cameraProducer = await this.sendTransport.produce({
       track,
-      encodings: [{ maxBitrate: q.camBitrate }],
+      codec: camCodec,
+      encodings: this.videoEncodings(camCodec?.mimeType, q.camBitrate, 'camera'),
+      codecOptions: { videoGoogleStartBitrate: 1000 },
       appData: { source: 'camera' },
     });
     this.producerSource.set(this.cameraProducer.id, 'camera');
@@ -426,9 +485,13 @@ class VoiceClient {
     });
     const track = this.screenStream.getVideoTracks()[0];
     track.onended = () => this.unpublishScreen();
+    track.contentHint = 'detail';
+    const scrCodec = this.pickVideoCodec();
     this.screenProducer = await this.sendTransport.produce({
       track,
-      encodings: [{ maxBitrate: q.screenBitrate }],
+      codec: scrCodec,
+      encodings: this.videoEncodings(scrCodec?.mimeType, q.screenBitrate, 'screen'),
+      codecOptions: { videoGoogleStartBitrate: 1500 },
       appData: { source: 'screen' },
     });
     this.producerSource.set(this.screenProducer.id, 'screen');
@@ -622,6 +685,8 @@ class VoiceClient {
 
   async disconnect() {
     this.stopSpeakingAnalyzer('__self__');
+    this.micEffect?.stop();
+    this.micEffect = null;
     try {
       this.audioProducer?.close();
       this.cameraProducer?.close();

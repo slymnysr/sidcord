@@ -261,6 +261,10 @@ async function handleMessage(ws: AuthedSocket, wss: WebSocketServer, msg: Messag
         paused: false,
       });
       peer.consumers.set(consumer.id, consumer);
+      // Simulcast/SVC: en yüksek katmanı hedefle — bant yetmezse mediasoup BWE otomatik düşürür
+      if (consumer.kind === 'video') {
+        consumer.setPreferredLayers({ spatialLayer: 2, temporalLayer: 2 }).catch(() => {});
+      }
       // Sunucuda sağırlaştırılmışsa ses tüketicilerini duraklat (kimseyi duyamaz)
       if (consumer.kind === 'audio' && getVoiceState(ws.userId).deafen) {
         consumer.pause().catch(() => {});
