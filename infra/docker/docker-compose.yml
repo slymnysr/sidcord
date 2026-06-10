@@ -77,6 +77,15 @@ services:
       timeout: 5s
       retries: 5
 
+  # Geliştirme SMTP sunucusu — gönderilen tüm mailler http://localhost:8025 arayüzünde görünür
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: sidcord-mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
 volumes:
   postgres_data:
   redis_data:
