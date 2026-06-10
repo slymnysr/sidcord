@@ -4,6 +4,51 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ===== Tema token'ları (RGB kanalları, Tailwind <alpha-value> ile uyumlu) ===== */
+:root,
+html[data-theme='dark'] {
+  --c-bg: 14 17 23; /* #0E1117 */
+  --c-surface-1: 22 27 34; /* #161B22 */
+  --c-surface-2: 31 37 48; /* #1F2530 */
+  --c-surface-3: 42 49 64; /* #2A3140 */
+  --c-line: 45 51 59; /* #2D333B */
+  --c-ink-primary: 230 237 243; /* #E6EDF3 */
+  --c-ink-secondary: 156 163 175; /* #9CA3AF */
+  --c-ink-tertiary: 107 114 128; /* #6B7280 */
+  --c-ink-muted: 72 79 88; /* #484F58 */
+  --c-scrollbar: 45 51 59;
+  --c-scrollbar-hover: 58 65 74;
+  color-scheme: dark;
+}
+
+/* AMOLED — tam siyah arka plan */
+html[data-theme='amoled'] {
+  --c-bg: 0 0 0;
+  --c-surface-1: 10 10 10;
+  --c-surface-2: 18 18 18;
+  --c-surface-3: 30 30 30;
+  --c-line: 38 38 38;
+  --c-scrollbar: 38 38 38;
+  --c-scrollbar-hover: 55 55 55;
+  color-scheme: dark;
+}
+
+/* Aydınlık (Light) tema */
+html[data-theme='light'] {
+  --c-bg: 230 231 235; /* sidebar/rail — en derin gri */
+  --c-surface-1: 255 255 255; /* ana sohbet alanı */
+  --c-surface-2: 243 244 246; /* kart/girdi yüzeyi */
+  --c-surface-3: 232 233 237; /* hover/yükseltilmiş */
+  --c-line: 222 224 229; /* kenarlık */
+  --c-ink-primary: 28 30 34; /* neredeyse siyah */
+  --c-ink-secondary: 79 84 92;
+  --c-ink-tertiary: 110 116 124;
+  --c-ink-muted: 150 156 164;
+  --c-scrollbar: 200 203 209;
+  --c-scrollbar-hover: 176 180 188;
+  color-scheme: light;
+}
+
 html,
 body,
 #root {
@@ -14,8 +59,8 @@ body {
   font-family: 'Inter', sans-serif;
   font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   -webkit-font-smoothing: antialiased;
-  background: #0e1117;
-  color: #e6edf3;
+  background: rgb(var(--c-bg));
+  color: rgb(var(--c-ink-primary));
 }
 
 /* İnce, modern scrollbar */
@@ -27,12 +72,12 @@ body {
   background: transparent;
 }
 *::-webkit-scrollbar-thumb {
-  background: #2d333b;
+  background: rgb(var(--c-scrollbar));
   border-radius: 999px;
-  border: 2px solid #0e1117;
+  border: 2px solid rgb(var(--c-bg));
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: #3a414a;
+  background: rgb(var(--c-scrollbar-hover));
 }
 
 /* Density toggle (Discord paritesi: Cozy vs Compact) */
@@ -49,16 +94,69 @@ html[data-density='compact'] li[id^='msg-'] .text-\[15px\] {
   font-size: 0.875rem;
 }
 
-/* AMOLED tema — tam siyah arka plan */
-html[data-theme='amoled'] body,
-html[data-theme='amoled'] .bg-bg {
-  background-color: #000;
+
+/* ===== Erişilebilirlik (a11y) ===== */
+/* Klavye kullanıcıları için belirgin focus halkası (fare tıklamasında gösterilmez) */
+:focus-visible {
+  outline: 2px solid rgb(var(--c-ink-primary));
+  outline-offset: 2px;
+  border-radius: 4px;
 }
-html[data-theme='amoled'] .bg-surface-1 {
-  background-color: #0a0a0a;
+/* Marka renginde, daha yumuşak alternatif odak (buton/link) */
+a:focus-visible,
+button:focus-visible,
+[role='button']:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid #00d9a6;
+  outline-offset: 2px;
 }
-html[data-theme='amoled'] .bg-surface-2 {
-  background-color: #121212;
+/* Ekran okuyucu için görünmez ama okunabilir yardımcı sınıf */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+/* Hareket azaltma tercihi — animasyonları neredeyse kapat */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
-/* Density/theme'i sayfa açılışında uygula */
+/* Mesaja zıplama vurgusu (arama/sabit/yanıt → mesaja git) */
+@keyframes sidcord-jump-flash {
+  0%, 60% { background-color: rgb(0 217 166 / 0.18); }
+  100% { background-color: transparent; }
+}
+.sidcord-jump-flash {
+  animation: sidcord-jump-flash 1.8s ease-out;
+  border-radius: 6px;
+}
+
+/* Super-reaction patlama animasyonu */
+@keyframes sidcord-burst {
+  0%   { transform: translate(0, 0) scale(0.6); opacity: 1; }
+  100% { transform: translate(var(--bx), -42px) scale(1.4); opacity: 0; }
+}
+.sidcord-burst-particle {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  pointer-events: none;
+  animation: sidcord-burst 700ms ease-out forwards;
+  font-size: 14px;
+  z-index: 20;
+}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { httpUrl } from '../serverConfig';
 import { UserPlus, Check, X, Mail } from 'lucide-react';
 import { api } from '../api';
 import { useAppDispatch, useAppSelector, openModal } from '../store';
@@ -26,7 +27,7 @@ export function AddFriendModal() {
     const r = (await api as any).request?.('/friends') as any;
     // basit: doğrudan fetch et
     try {
-      const res = await fetch('/api/v1/friends', {
+      const res = await fetch(httpUrl('/api/v1/friends'), {
         headers: { Authorization: 'Bearer ' + localStorage.getItem('sidcord_access') },
       });
       setList(await res.json());
@@ -44,7 +45,7 @@ export function AddFriendModal() {
     setError(null);
     setSuccess(null);
     try {
-      const res = await fetch('/api/v1/friends', {
+      const res = await fetch(httpUrl('/api/v1/friends'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -68,7 +69,7 @@ export function AddFriendModal() {
   }
 
   async function accept(userId: string) {
-    await fetch(`/api/v1/friends/${userId}/accept`, {
+    await fetch(httpUrl(`/api/v1/friends/${userId}/accept`), {
       method: 'PUT',
       headers: { Authorization: 'Bearer ' + localStorage.getItem('sidcord_access') },
     });
@@ -77,7 +78,7 @@ export function AddFriendModal() {
 
   async function remove(userId: string) {
     if (!confirm('Arkadaşlığı sonlandırmak istiyor musun?')) return;
-    await fetch(`/api/v1/friends/${userId}`, {
+    await fetch(httpUrl(`/api/v1/friends/${userId}`), {
       method: 'DELETE',
       headers: { Authorization: 'Bearer ' + localStorage.getItem('sidcord_access') },
     });
@@ -85,7 +86,7 @@ export function AddFriendModal() {
   }
 
   async function openDM(userId: string) {
-    const res = await fetch('/api/v1/users/me/channels', {
+    const res = await fetch(httpUrl('/api/v1/users/me/channels'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

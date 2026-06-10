@@ -22,19 +22,19 @@ export default {
           500: '#FF6B6B', // coral secondary
           600: '#E54848',
         },
-        // Yüzey skala (tabandan tepe doğru)
-        bg: '#0E1117',
+        // Yüzey skala (tabandan tepe doğru) — CSS değişkenleriyle tema desteği
+        bg: 'rgb(var(--c-bg) / <alpha-value>)',
         surface: {
-          1: '#161B22',
-          2: '#1F2530',
-          3: '#2A3140',
+          1: 'rgb(var(--c-surface-1) / <alpha-value>)',
+          2: 'rgb(var(--c-surface-2) / <alpha-value>)',
+          3: 'rgb(var(--c-surface-3) / <alpha-value>)',
         },
-        line: '#2D333B',
+        line: 'rgb(var(--c-line) / <alpha-value>)',
         ink: {
-          primary: '#E6EDF3',
-          secondary: '#9CA3AF',
-          tertiary: '#6B7280',
-          muted: '#484F58',
+          primary: 'rgb(var(--c-ink-primary) / <alpha-value>)',
+          secondary: 'rgb(var(--c-ink-secondary) / <alpha-value>)',
+          tertiary: 'rgb(var(--c-ink-tertiary) / <alpha-value>)',
+          muted: 'rgb(var(--c-ink-muted) / <alpha-value>)',
         },
         // Status
         status: {

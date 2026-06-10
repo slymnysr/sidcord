@@ -1,6 +1,7 @@
 // Sidcord WebSocket bağlantısı (Phoenix Channels) + presence
 import { Socket, Channel, Presence } from 'phoenix';
 import { tokenStore } from './api';
+import { wsUrl } from './serverConfig';
 
 let socket: Socket | null = null;
 const guildChannels = new Map<string, Channel>();
@@ -14,7 +15,11 @@ export function connectGateway(): Socket | null {
 
   if (socket) return socket;
 
-  socket = new Socket('/socket', { params: { token }, logger: () => {} });
+  socket = new Socket(wsUrl('/socket'), { params: { token }, logger: () => {} });
+  // Bağlantı durumu olaylarını yayınla → ConnectionBanner dinler
+  socket.onOpen(() => { window.dispatchEvent(new CustomEvent('sidcord:gw', { detail: 'connected' })); });
+  socket.onClose(() => { window.dispatchEvent(new CustomEvent('sidcord:gw', { detail: 'disconnected' })); });
+  socket.onError(() => { window.dispatchEvent(new CustomEvent('sidcord:gw', { detail: 'disconnected' })); });
   socket.connect();
   return socket;
 }
@@ -30,13 +35,65 @@ export function disconnectGateway() {
 export interface PresenceMeta {
   online_at: number;
   status: string;
+  activity?: UserActivity;
+}
+
+// Rich presence aktivitesi (Oynuyor/Yayında/Dinliyor/İzliyor)
+export interface UserActivity {
+  type: 'playing' | 'streaming' | 'listening' | 'watching' | 'custom';
+  name: string;
+  started_at?: number;
+}
+
+// Presence durumu — "offline" = görünmez (presence'a yazılmaz, olaylar alınmaya devam eder)
+let presenceStatus: string = 'online';
+
+export function setPresenceStatus(status: 'online' | 'idle' | 'dnd' | 'offline') {
+  presenceStatus = status;
+  for (const ch of guildChannels.values()) {
+    ch.push('status', { status });
+  }
+}
+
+// Aktif aktivite — localStorage'da kalıcı; yeni guild kanallarına join'de otomatik gönderilir
+let currentActivity: UserActivity | null = null;
+try {
+  const raw = localStorage.getItem('sidcord_activity');
+  if (raw) currentActivity = JSON.parse(raw);
+} catch {}
+
+export function getMyActivity(): UserActivity | null {
+  return currentActivity;
+}
+
+export function setActivity(
+  activity: { type: UserActivity['type']; name: string } | null,
+  opts: { persist?: boolean } = {},
+) {
+  const persist = opts.persist !== false;
+  currentActivity = activity ? { ...activity, started_at: Date.now() } : null;
+  // Otomatik oyun algılama (masaüstü) persist=false ile çağırır: kullanıcının
+  // elle ayarladığı aktivite localStorage'da korunur, oyun kapanınca ona dönülür.
+  if (persist) {
+    try {
+      if (currentActivity) localStorage.setItem('sidcord_activity', JSON.stringify(currentActivity));
+      else localStorage.removeItem('sidcord_activity');
+    } catch {}
+  }
+  for (const ch of guildChannels.values()) {
+    ch.push('activity', currentActivity ?? {});
+  }
 }
 
 export function joinGuild(
   guildId: string,
   handlers: {
     onMessage?: (event: any) => void;
-    onPresence?: (onlineUserIds: Set<string>) => void;
+    onPresence?: (
+      onlineUserIds: Set<string>,
+      activities?: Record<string, UserActivity>,
+      statuses?: Record<string, string>,
+    ) => void;
   } = {},
 ): Channel | null {
   const s = connectGateway();
@@ -44,7 +101,7 @@ export function joinGuild(
   const existing = guildChannels.get(guildId);
   if (existing) return existing;
 
-  const ch = s.channel(`guild:${guildId}`);
+  const ch = s.channel(`guild:${guildId}`, { status: presenceStatus });
   if (handlers.onMessage) {
     ch.on('MESSAGE_CREATE', handlers.onMessage);
   }
@@ -61,16 +118,23 @@ export function joinGuild(
 
   function emitPresence() {
     const ids = new Set<string>();
-    presence.list((id) => {
+    const activities: Record<string, UserActivity> = {};
+    const statuses: Record<string, string> = {};
+    presence.list((id, data: any) => {
       ids.add(id);
+      const meta = data?.metas?.[0];
+      if (meta?.activity?.name) activities[id] = meta.activity;
+      if (meta?.status) statuses[id] = meta.status;
       return id;
     });
-    handlers.onPresence?.(ids);
+    handlers.onPresence?.(ids, activities, statuses);
   }
 
   presence.onSync(emitPresence);
 
-  ch.join();
+  ch.join().receive('ok', () => {
+    if (currentActivity) ch.push('activity', currentActivity);
+  });
   guildChannels.set(guildId, ch);
   return ch;
 }
@@ -143,5 +207,35 @@ export function leaveUser() {
 // Typing — kullanıcı yazarken çağrılır (throttled önerilir)
 export function sendTyping(guildId: string, channelId: string) {
   const ch = guildChannels.get(guildId);
+  if (ch) ch.push('typing', { channel_id: channelId });
+}
+
+// === DM "yazıyor" göstergesi (dm:<channelId> Phoenix kanalı) ===
+const dmChannels = new Map<string, Channel>();
+
+export function joinDMChannel(channelId: string, onTyping?: (userId: string) => void): Channel | null {
+  const s = connectGateway();
+  if (!s) return null;
+  const existing = dmChannels.get(channelId);
+  if (existing) return existing;
+  const ch = s.channel(`dm:${channelId}`);
+  if (onTyping) {
+    ch.on('TYPING_START', (ev: any) => onTyping(ev.user_id));
+  }
+  ch.join();
+  dmChannels.set(channelId, ch);
+  return ch;
+}
+
+export function leaveDMChannel(channelId: string) {
+  const ch = dmChannels.get(channelId);
+  if (ch) {
+    ch.leave();
+    dmChannels.delete(channelId);
+  }
+}
+
+export function sendDMTyping(channelId: string) {
+  const ch = dmChannels.get(channelId);
   if (ch) ch.push('typing', { channel_id: channelId });
 }

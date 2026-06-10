@@ -1,23 +1,44 @@
 import { useState } from 'react';
 import { useAppDispatch, useAppSelector, loginThunk, registerThunk } from '../store';
+import { SERVER_BASE, setServerBase } from '../serverConfig';
+import { api } from '../api';
 
-type Mode = 'login' | 'register';
+type Mode = 'login' | 'register' | 'forgot' | 'reset';
+
+// URL'de ?reset_token= varsa (şifre sıfırlama mailinden gelindi) doğrudan reset formunu aç
+function initialResetToken(): string {
+  try {
+    return new URLSearchParams(location.search).get('reset_token') ?? '';
+  } catch {
+    return '';
+  }
+}
 
 export function AuthPage() {
   const dispatch = useAppDispatch();
   const { loading, error } = useAppSelector((s) => s.auth);
-  const [mode, setMode] = useState<Mode>('login');
+  const [resetToken] = useState(initialResetToken);
+  const [mode, setMode] = useState<Mode>(resetToken ? 'reset' : 'login');
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [totpCode, setTotpCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [newPassword2, setNewPassword2] = useState('');
+  const [flowMsg, setFlowMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+  const [flowBusy, setFlowBusy] = useState(false);
 
-  function submit(e: React.FormEvent) {
+  // 2FA gerekli mi? (backend "2fa_required" veya "invalid_2fa" döndürdü)
+  const needs2fa = error === '2fa_required' || error === 'invalid_2fa';
+
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
+    setFlowMsg(null);
     if (mode === 'login') {
-      dispatch(loginThunk({ email, password }));
-    } else {
+      dispatch(loginThunk({ email, password, totp_code: needs2fa ? totpCode : undefined }));
+    } else if (mode === 'register') {
       dispatch(
         registerThunk({
           email,
@@ -26,6 +47,32 @@ export function AuthPage() {
           display_name: displayName || username,
         }),
       );
+    } else if (mode === 'forgot') {
+      setFlowBusy(true);
+      try {
+        await api.forgotPassword(email);
+        setFlowMsg({ kind: 'ok', text: 'Bu adrese kayıtlı bir hesap varsa sıfırlama bağlantısı gönderildi — gelen kutunu kontrol et.' });
+      } catch {
+        setFlowMsg({ kind: 'err', text: 'İstek gönderilemedi, tekrar dene.' });
+      } finally {
+        setFlowBusy(false);
+      }
+    } else if (mode === 'reset') {
+      if (newPassword !== newPassword2) {
+        setFlowMsg({ kind: 'err', text: 'Şifreler eşleşmiyor.' });
+        return;
+      }
+      setFlowBusy(true);
+      try {
+        await api.resetPassword(resetToken, newPassword);
+        setFlowMsg({ kind: 'ok', text: 'Şifren güncellendi — yeni şifrenle giriş yapabilirsin.' });
+        history.replaceState(null, '', location.pathname);
+        setMode('login');
+      } catch (err: any) {
+        setFlowMsg({ kind: 'err', text: err?.message || 'Bağlantı geçersiz veya süresi dolmuş.' });
+      } finally {
+        setFlowBusy(false);
+      }
     }
   }
 
@@ -42,7 +89,13 @@ export function AuthPage() {
           />
           <h1 className="text-3xl font-bold tracking-tight">Sidcord</h1>
           <p className="text-ink-secondary text-sm mt-1">
-            {mode === 'login' ? 'Hesabına giriş yap' : 'Yeni hesap oluştur'}
+            {mode === 'login'
+              ? 'Hesabına giriş yap'
+              : mode === 'register'
+                ? 'Yeni hesap oluştur'
+                : mode === 'forgot'
+                  ? 'E-postana sıfırlama bağlantısı gönderelim'
+                  : 'Hesabın için yeni bir şifre belirle'}
           </p>
         </div>
 
@@ -71,46 +124,138 @@ export function AuthPage() {
             </>
           )}
 
-          <Field label="E-posta">
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="sen@ornek.com"
-              required
-              autoComplete="email"
-              className={inputCls}
-            />
-          </Field>
+          {mode !== 'reset' && (
+            <Field label="E-posta">
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="sen@ornek.com"
+                required
+                autoComplete="email"
+                className={inputCls}
+              />
+            </Field>
+          )}
 
-          <Field label="Parola" hint={mode === 'register' ? 'En az 8 karakter' : ''}>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-              minLength={mode === 'register' ? 8 : undefined}
-              className={inputCls}
-            />
-          </Field>
+          {(mode === 'login' || mode === 'register') && (
+            <Field label="Parola" hint={mode === 'register' ? 'En az 8 karakter' : ''}>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                minLength={mode === 'register' ? 8 : undefined}
+                className={inputCls}
+              />
+            </Field>
+          )}
 
-          {error && (
+          {mode === 'login' && (
+            <div className="-mt-2 text-right">
+              <button
+                type="button"
+                onClick={() => { setMode('forgot'); setFlowMsg(null); }}
+                className="text-xs text-ink-tertiary hover:text-brand-400"
+              >
+                Şifremi unuttum
+              </button>
+            </div>
+          )}
+
+          {mode === 'reset' && (
+            <>
+              <Field label="Yeni parola" hint="En az 8 karakter">
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  required
+                  minLength={8}
+                  autoComplete="new-password"
+                  className={inputCls}
+                />
+              </Field>
+              <Field label="Yeni parola (tekrar)">
+                <input
+                  type="password"
+                  value={newPassword2}
+                  onChange={(e) => setNewPassword2(e.target.value)}
+                  required
+                  minLength={8}
+                  autoComplete="new-password"
+                  className={inputCls}
+                />
+              </Field>
+            </>
+          )}
+
+          {flowMsg && (
+            <div
+              className={
+                'text-sm rounded-lg px-3 py-2 border ' +
+                (flowMsg.kind === 'ok'
+                  ? 'text-brand-400 bg-brand-500/10 border-brand-500/30'
+                  : 'text-accent-500 bg-accent-500/10 border-accent-500/30')
+              }
+            >
+              {flowMsg.text}
+            </div>
+          )}
+
+          {mode === 'login' && needs2fa && (
+            <Field label="İki Adımlı Doğrulama Kodu" hint="Authenticator uygulamandaki 6 haneli kod">
+              <input
+                value={totpCode}
+                onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="000000"
+                inputMode="numeric"
+                autoFocus
+                className={inputCls + ' tracking-[0.3em] text-center font-mono text-lg'}
+              />
+            </Field>
+          )}
+
+          {error && !needs2fa && (
             <div className="text-sm text-accent-500 bg-accent-500/10 border border-accent-500/30 rounded-lg px-3 py-2">
               {error}
+            </div>
+          )}
+          {error === 'invalid_2fa' && (
+            <div className="text-sm text-accent-500 bg-accent-500/10 border border-accent-500/30 rounded-lg px-3 py-2">
+              Doğrulama kodu hatalı, tekrar dene.
             </div>
           )}
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || flowBusy || (needs2fa && totpCode.length !== 6)}
             className="w-full py-2.5 rounded-xl bg-brand-500 hover:bg-brand-400 disabled:bg-surface-3 disabled:text-ink-tertiary text-white font-semibold transition-colors"
           >
-            {loading ? 'Bekleyin...' : mode === 'login' ? 'Giriş Yap' : 'Hesap Oluştur'}
+            {loading || flowBusy
+              ? 'Bekleyin...'
+              : needs2fa
+                ? 'Doğrula ve Giriş Yap'
+                : mode === 'login'
+                  ? 'Giriş Yap'
+                  : mode === 'register'
+                    ? 'Hesap Oluştur'
+                    : mode === 'forgot'
+                      ? 'Sıfırlama Bağlantısı Gönder'
+                      : 'Şifreyi Güncelle'}
           </button>
 
           <div className="text-center text-sm text-ink-secondary pt-2">
-            {mode === 'login' ? (
+            {(mode === 'forgot' || mode === 'reset') ? (
+              <button
+                type="button"
+                onClick={() => { setMode('login'); setFlowMsg(null); }}
+                className="text-brand-500 hover:text-brand-400 font-medium"
+              >
+                ← Girişe dön
+              </button>
+            ) : mode === 'login' ? (
               <>
                 Hesabın yok mu?{' '}
                 <button
@@ -138,6 +283,24 @@ export function AuthPage() {
 
         <p className="text-center text-xs text-ink-tertiary mt-6">
           Türkiye'nin yerli sohbet platformu · v0.1
+        </p>
+        <p className="text-center mt-2">
+          <button
+            type="button"
+            onClick={() => {
+              const v = prompt(
+                'Sidcord sunucu adresi (boş bırak = bu site):\nÖrn: https://sidcord.example.com',
+                SERVER_BASE,
+              );
+              if (v === null) return;
+              setServerBase(v);
+              location.reload();
+            }}
+            className="text-[11px] text-ink-tertiary hover:text-ink-secondary underline decoration-dotted"
+            title="Masaüstü uygulamasında bağlanılacak sunucuyu değiştir"
+          >
+            ⚙ Sunucu: {SERVER_BASE || 'bu site'}
+          </button>
         </p>
       </div>
     </div>

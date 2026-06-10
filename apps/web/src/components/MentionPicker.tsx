@@ -50,13 +50,17 @@ export function MentionPicker({ type, query, onPick, onClose }: Props) {
     }
     if (type === '/') {
       const matches = commands.filter((c) => c.name.toLowerCase().includes(q)).slice(0, 10);
-      return matches.map((c) => ({
-        key: c.id,
-        label: '/' + c.name,
-        sub: c.description,
-        color: '#5865F2',
-        replacement: '/' + c.name,
-      }));
+      return matches.map((c) => {
+        const hint = (c.options ?? []).map((o) => (o.required ? `<${o.name}>` : `[${o.name}]`)).join(' ');
+        return {
+          key: c.id,
+          label: '/' + c.name + (hint ? ' ' + hint : ''),
+          sub: c.description,
+          color: '#5865F2',
+          // Argümanlı komutta boşluk bırak ki kullanıcı değer yazabilsin
+          replacement: '/' + c.name + ((c.options ?? []).length > 0 ? ' ' : ''),
+        };
+      });
     }
     const cs = channels
       .filter((c) => c.type !== 'category' && c.name.toLowerCase().includes(q))

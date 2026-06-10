@@ -41,14 +41,29 @@ export function useVoiceState() {
 export function VoiceStatusBar() {
   const { connected, channelId, micOn, deafened } = useVoiceState();
   const guildId = useAppSelector((s) => s.guilds.selectedId);
+  const me = useAppSelector((s) => s.auth.user);
   const channel = useAppSelector((s) =>
     guildId && channelId ? s.channels.byGuild[guildId]?.find((c) => c.id === channelId) : null,
   );
   const guild = useAppSelector((s) => s.guilds.list.find((g) => g.id === guildId));
 
+  // Kendi sunucu-susturma/sağırlaştırma durumum (mod tarafından) — buton kilidi + gösterge
+  const [serverState, setServerState] = useState(() => (me ? voice.getServerVoice(me.id) : { mute: false, deafen: false }));
+  useEffect(() => {
+    if (!me) return;
+    setServerState(voice.getServerVoice(me.id));
+    const onVs = (ev: any) => { if (String(ev.userId) === me.id) setServerState({ mute: ev.serverMute, deafen: ev.serverDeaf }); };
+    voice.on('voiceState:changed', onVs);
+    return () => voice.off('voiceState:changed', onVs);
+  }, [me?.id]);
+
   if (!connected || !channelId) return null;
 
+  const srvMute = serverState.mute;
+  const srvDeaf = serverState.deafen;
+
   function toggleMic() {
+    if (srvMute || srvDeaf) return; // Sunucu tarafından susturuldun — kendin açamazsın
     voice.setMicrophoneEnabled(!micOn);
   }
 
@@ -62,9 +77,11 @@ export function VoiceStatusBar() {
     <div className="bg-surface-2 border-t border-line px-3 py-2 flex items-center gap-2">
       <span className="w-2 h-2 rounded-full bg-status-online shrink-0" />
       <div className="flex-1 min-w-0">
-        <div className="text-[12px] font-semibold text-status-online flex items-center gap-1">
+        <div className={'text-[12px] font-semibold flex items-center gap-1 ' + (srvMute || srvDeaf ? 'text-accent-500' : 'text-status-online')}>
           <Volume2 size={12} className="shrink-0" />
-          <span className="truncate">Ses Bağlı</span>
+          <span className="truncate">
+            {srvDeaf ? 'Sunucuda sağırlaştırıldın' : srvMute ? 'Sunucuda susturuldun' : 'Ses Bağlı'}
+          </span>
         </div>
         <div className="text-[10px] text-ink-tertiary truncate">
           {channel?.name ? `#${channel.name}` : '—'}
@@ -73,31 +90,35 @@ export function VoiceStatusBar() {
       </div>
       <button
         onClick={toggleMic}
-        title={micOn ? 'Mikrofonu kapat' : 'Mikrofonu aç'}
+        disabled={srvMute || srvDeaf}
+        title={srvMute || srvDeaf ? 'Sunucu tarafından susturuldun — kendin açamazsın' : micOn ? 'Mikrofonu kapat' : 'Mikrofonu aç'}
         className={
           'w-7 h-7 rounded-md flex items-center justify-center transition-colors shrink-0 ' +
-          (micOn
-            ? 'text-ink-secondary hover:bg-surface-3 hover:text-ink-primary'
-            : 'bg-accent-500/15 text-accent-500 hover:bg-accent-500/25')
+          (srvMute || srvDeaf
+            ? 'bg-accent-500/25 text-accent-500 cursor-not-allowed'
+            : micOn
+              ? 'text-ink-secondary hover:bg-surface-3 hover:text-ink-primary'
+              : 'bg-accent-500/15 text-accent-500 hover:bg-accent-500/25')
         }
       >
-        {micOn ? <Mic size={14} /> : <MicOff size={14} />}
+        {micOn && !srvMute && !srvDeaf ? <Mic size={14} /> : <MicOff size={14} />}
       </button>
       <button
-        onClick={() => voice.setDeafened(!deafened)}
-        title={deafened ? 'Sağırlığı aç' : 'Sağırlaştır (tüm sesi kapat)'}
+        onClick={() => { if (!srvDeaf) voice.setDeafened(!deafened); }}
+        disabled={srvDeaf}
+        title={srvDeaf ? 'Sunucu tarafından sağırlaştırıldın' : deafened ? 'Sağırlığı aç' : 'Sağırlaştır (tüm sesi kapat)'}
         className={
           'w-7 h-7 rounded-md flex items-center justify-center transition-colors shrink-0 ' +
-          (deafened
-            ? 'bg-accent-500/15 text-accent-500 hover:bg-accent-500/25'
+          (deafened || srvDeaf
+            ? 'bg-accent-500/' + (srvDeaf ? '25 cursor-not-allowed' : '15 hover:bg-accent-500/25') + ' text-accent-500'
             : 'text-ink-secondary hover:bg-surface-3 hover:text-ink-primary')
         }
       >
-        {deafened ? <HeadphoneOff size={14} /> : <Headphones size={14} />}
+        {deafened || srvDeaf ? <HeadphoneOff size={14} /> : <Headphones size={14} />}
       </button>
       <button
         onClick={leave}
-        title="Sesten ayrıl"
+        title="Sesten ayrıl" aria-label="Sesten ayrıl"
         className="w-7 h-7 rounded-md text-ink-secondary hover:bg-accent-500 hover:text-white flex items-center justify-center transition-colors shrink-0"
       >
         <PhoneOff size={14} />

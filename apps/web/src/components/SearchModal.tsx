@@ -5,17 +5,25 @@ import { useAppDispatch, useAppSelector, selectGuild, selectChannel, closeModal 
 
 export function SearchModal() {
   const [q, setQ] = useState('');
-  const [scope, setScope] = useState<'all' | 'guild' | 'channel'>('guild');
+  const mode = useAppSelector((s) => s.ui.mode);
+  // DM görünümünde varsayılan kapsam "bu sohbet" (sunucu kapsamı DM'de anlamsız)
+  const [scope, setScope] = useState<'all' | 'guild' | 'channel'>(mode === 'dm' ? 'channel' : 'guild');
   const [results, setResults] = useState<APISearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const dispatch = useAppDispatch();
   const guildId = useAppSelector((s) => s.guilds.selectedId);
   const channelId = useAppSelector((s) => s.channels.selectedId);
+  const guildChannels = useAppSelector((s) => (s.guilds.selectedId ? s.channels.byGuild[s.guilds.selectedId] ?? [] : []));
+  const [members, setMembers] = useState<Awaited<ReturnType<typeof api.guilds.members>>>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    if (guildId) api.guilds.members(guildId).then(setMembers).catch(() => {});
+  }, [guildId]);
 
   useEffect(() => {
     if (!q.trim()) {
@@ -28,7 +36,59 @@ export function SearchModal() {
         const opts: any = { limit: 25 };
         if (scope === 'guild' && guildId) opts.guildId = guildId;
         if (scope === 'channel' && channelId) opts.channelId = channelId;
-        const r = await api.search.messages(q.trim(), opts);
+
+        let text = q;
+        const findMember = (token: string) => {
+          const t = token.toLowerCase().replace(/^@/, '');
+          return members.find(
+            (m) =>
+              (m.nickname ?? '').toLowerCase().includes(t) ||
+              m.display_name.toLowerCase().includes(t) ||
+              m.username.toLowerCase().includes(t),
+          );
+        };
+        // from:kullanıcı → yazar
+        const fromMatch = text.match(/\bfrom:(\S+)/i);
+        if (fromMatch) {
+          const mem = findMember(fromMatch[1]);
+          if (mem) opts.authorId = mem.user_id;
+          text = text.replace(/\bfrom:\S+/i, '').trim();
+        }
+        // mentions:kullanıcı → bahsedilen
+        const menMatch = text.match(/\bmentions:(\S+)/i);
+        if (menMatch) {
+          const mem = findMember(menMatch[1]);
+          if (mem) opts.mentions = mem.user_id;
+          text = text.replace(/\bmentions:\S+/i, '').trim();
+        }
+        // in:#kanal → kanal
+        const inMatch = text.match(/\bin:(\S+)/i);
+        if (inMatch) {
+          const token = inMatch[1].toLowerCase().replace(/^#/, '');
+          const ch = guildChannels.find((c) => c.name.toLowerCase().includes(token));
+          if (ch) opts.channelId = ch.id;
+          text = text.replace(/\bin:\S+/i, '').trim();
+        }
+        // has:image|link|video|file|sound (çoklu)
+        const hasTokens = [...text.matchAll(/\bhas:(\w+)/gi)].map((m) => m[1].toLowerCase());
+        if (hasTokens.length) {
+          opts.has = hasTokens;
+          text = text.replace(/\bhas:\w+/gi, '').trim();
+        }
+        // pinned:true
+        if (/\bpinned:true\b/i.test(text)) {
+          opts.pinned = true;
+          text = text.replace(/\bpinned:true\b/i, '').trim();
+        }
+        // before:/after:/during: YYYY-MM-DD
+        for (const op of ['before', 'after', 'during'] as const) {
+          const m = text.match(new RegExp(`\\b${op}:(\\d{4}-\\d{2}-\\d{2})`, 'i'));
+          if (m) {
+            opts[op] = m[1];
+            text = text.replace(new RegExp(`\\b${op}:\\S+`, 'i'), '').trim();
+          }
+        }
+        const r = await api.search.messages(text || ' ', opts);
         setResults(r);
       } catch (e) {
         console.warn('search', e);
@@ -37,7 +97,7 @@ export function SearchModal() {
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [q, scope, guildId, channelId]);
+  }, [q, scope, guildId, channelId, members, guildChannels]);
 
   function jumpTo(r: APISearchResult) {
     if (r.channel.guild_id) {
@@ -45,6 +105,12 @@ export function SearchModal() {
     }
     dispatch(selectChannel(r.channel.id));
     dispatch(closeModal());
+    // Kanal yüklendikten sonra mesaja kaydır + vurgula
+    const mid = r.message.id;
+    const cid = r.channel.id;
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('sidcord:jump-to-message', { detail: { messageId: mid, channelId: cid } }));
+    }, 350);
   }
 
   return (
@@ -67,11 +133,11 @@ export function SearchModal() {
               : 'bg-surface-2 text-ink-secondary hover:bg-surface-3 disabled:opacity-40')
           }
         >
-          Bu kanal
+          {mode === 'dm' ? 'Bu sohbet' : 'Bu kanal'}
         </button>
         <button
           onClick={() => setScope('guild')}
-          disabled={!guildId}
+          disabled={!guildId || mode === 'dm'}
           className={
             'px-3 py-1 rounded-lg text-xs font-medium ' +
             (scope === 'guild'
@@ -100,10 +166,32 @@ export function SearchModal() {
           ref={inputRef}
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Aramak istediğin metni yaz..."
+          placeholder="Ara… (from:, mentions:, in:, has:, before:, after:, pinned:true)"
           className="w-full pl-9 pr-3 py-2.5 bg-surface-2 border border-line focus:border-brand-500/50 focus:outline-none rounded-lg text-ink-primary"
         />
       </div>
+      {!q && (
+        <div className="mb-4 flex flex-wrap gap-1.5">
+          {[
+            'from:kullanıcı',
+            'mentions:kullanıcı',
+            'in:#kanal',
+            'has:image',
+            'has:link',
+            'before:2026-01-01',
+            'after:2026-01-01',
+            'pinned:true',
+          ].map((op) => (
+            <button
+              key={op}
+              onClick={() => setQ((v) => (v ? v + ' ' : '') + op.split(':')[0] + ':')}
+              className="text-[11px] font-mono px-2 py-1 rounded bg-surface-2 text-ink-tertiary hover:text-brand-400 hover:bg-surface-3"
+            >
+              {op}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="max-h-96 overflow-y-auto space-y-2">
         {loading && <p className="text-sm text-ink-tertiary">Aranıyor...</p>}

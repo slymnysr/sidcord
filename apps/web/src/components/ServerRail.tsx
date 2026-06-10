@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
+import { httpUrl } from '../serverConfig';
 import clsx from 'clsx';
 import { Plus, Compass, Folder } from 'lucide-react';
-import { useAppDispatch, useAppSelector, openModal, switchToDM, switchToGuild } from '../store';
+import { useAppDispatch, useAppSelector, openModal, switchToDM, switchToGuild, switchToDiscover } from '../store';
 import { api, type APIGuild } from '../api';
 
 interface FolderView {
@@ -18,8 +19,6 @@ export function ServerRail() {
   const mode = useAppSelector((s) => s.ui.mode);
   const dispatch = useAppDispatch();
 
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const [folders, setFolders] = useState<FolderView[]>([]);
 
   async function refreshFolders() {
@@ -31,20 +30,10 @@ export function ServerRail() {
     refreshFolders();
   }, []);
 
-  useEffect(() => {
-    function onClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    }
-    if (menuOpen) document.addEventListener('mousedown', onClick);
-    return () => document.removeEventListener('mousedown', onClick);
-  }, [menuOpen]);
-
   return (
     <aside className="w-[76px] bg-bg flex flex-col items-center py-4 gap-3 border-r border-line">
       <button
-        title="Arkadaşlar / Direkt Mesajlar"
+        title="Arkadaşlar / Direkt Mesajlar" aria-label="Arkadaşlar / Direkt Mesajlar"
         onClick={() => dispatch(switchToDM())}
         className={
           'w-12 h-12 rounded-xl bg-surface-1 border border-line hover:border-brand-500/40 hover:scale-105 flex items-center justify-center overflow-hidden transition-all ' +
@@ -127,7 +116,7 @@ export function ServerRail() {
               await api.folders.create({ name: name.trim() });
               refreshFolders();
             }}
-            title="Yeni Klasör"
+            title="Yeni Klasör" aria-label="Yeni Klasör"
             className="w-12 h-12 rounded-xl bg-surface-1 border border-dashed border-line hover:border-brand-500/40 text-ink-tertiary hover:text-brand-500 flex items-center justify-center transition-colors"
           >
             <Folder size={18} />
@@ -135,46 +124,21 @@ export function ServerRail() {
         )}
       </div>
 
-      <div className="flex flex-col gap-2 items-center relative" ref={menuRef}>
-        {menuOpen && (
-          <div className="absolute bottom-0 left-full ml-3 w-56 bg-surface-1 border border-line rounded-xl shadow-2xl p-1 z-30">
-            <button
-              onClick={() => {
-                setMenuOpen(false);
-                dispatch(openModal('create_guild'));
-              }}
-              className="w-full text-left px-3 py-2 rounded-lg hover:bg-surface-2 text-ink-primary flex items-center gap-2"
-            >
-              <Plus size={16} className="text-brand-500" />
-              <span className="text-sm font-medium">Sunucu Oluştur</span>
-            </button>
-            <button
-              onClick={() => {
-                setMenuOpen(false);
-                dispatch(openModal('join_guild'));
-              }}
-              className="w-full text-left px-3 py-2 rounded-lg hover:bg-surface-2 text-ink-primary flex items-center gap-2"
-            >
-              <Compass size={16} className="text-brand-500" />
-              <span className="text-sm font-medium">Davet ile Katıl</span>
-            </button>
-          </div>
-        )}
-
+      <div className="flex flex-col gap-2 items-center">
         <button
-          onClick={() => setMenuOpen((v) => !v)}
-          className={clsx(
-            'w-12 h-12 rounded-xl bg-surface-1 hover:bg-brand-500/15 hover:text-brand-500 text-ink-secondary transition-colors flex items-center justify-center border border-line',
-            menuOpen && 'bg-brand-500/15 text-brand-500',
-          )}
-          title="Sunucu Ekle"
+          onClick={() => dispatch(openModal('create_guild'))}
+          className="w-12 h-12 rounded-xl bg-surface-1 hover:bg-brand-500/15 hover:text-brand-500 text-ink-secondary transition-colors flex items-center justify-center border border-line"
+          title="Sunucu Ekle" aria-label="Sunucu Ekle"
         >
           <Plus size={20} strokeWidth={2.5} />
         </button>
         <button
-          onClick={() => dispatch(openModal('join_guild'))}
-          className="w-12 h-12 rounded-xl bg-surface-1 hover:bg-brand-500/15 hover:text-brand-500 text-ink-secondary transition-colors flex items-center justify-center border border-line"
-          title="Davet ile Katıl"
+          onClick={() => dispatch(switchToDiscover())}
+          className={clsx(
+            'w-12 h-12 rounded-xl bg-surface-1 hover:bg-brand-500/15 hover:text-brand-500 text-ink-secondary transition-colors flex items-center justify-center border border-line',
+            mode === 'discover' && 'ring-2 ring-brand-500 ring-offset-2 ring-offset-bg border-brand-500 text-brand-500',
+          )}
+          title="Sunucuları Keşfet" aria-label="Sunucuları Keşfet"
         >
           <Compass size={20} />
         </button>
@@ -204,9 +168,10 @@ function GuildIcon({ guild, active }: { guild: APIGuild; active: boolean }) {
     }
     return { hasUnread: unread, totalMentions: mentions };
   });
+  const muted = typeof localStorage !== 'undefined' && localStorage.getItem('sidcord_guildmute_' + guild.id) === '1';
 
   return (
-    <div className="relative">
+    <div className={'relative ' + (muted ? 'opacity-50' : '')}>
       <button
         onClick={() => dispatch(switchToGuild(guild.id))}
         onContextMenu={(e) => {
@@ -273,7 +238,7 @@ function GuildContextMenu({
   async function leave() {
     if (!confirm(`${guild.name} sunucusundan ayrılmak istiyor musun?`)) return;
     try {
-      await fetch(`/api/v1/guilds/${guild.id}/leave`, {
+      await fetch(httpUrl(`/api/v1/guilds/${guild.id}/leave`), {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + localStorage.getItem('sidcord_access') },
       });
@@ -329,7 +294,7 @@ function FolderView({
   folder: FolderView;
   guilds: APIGuild[];
   selectedId: string | null;
-  mode: 'guild' | 'dm';
+  mode: 'guild' | 'dm' | 'discover';
   onDropToFolder: (guildId: string) => void;
   onRemove: () => void;
 }) {

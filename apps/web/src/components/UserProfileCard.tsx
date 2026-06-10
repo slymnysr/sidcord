@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
+import { httpUrl } from '../serverConfig';
 import { MessageSquare, UserPlus, X, Check, Clock } from 'lucide-react';
 import { api, type APIPublicUser } from '../api';
-import { useAppDispatch, useAppSelector, selectChannel, setMode, selectDM, setPendingDM } from '../store';
+import { useAppDispatch, useAppSelector, selectChannel, setMode, selectDM, setPendingDM, addToast } from '../store';
+import { ProfileBadges } from './ProfileBadges';
+import { ConnectionChips } from './connectionMeta';
+import { activityVerb, activityElapsed } from '../activity';
 
 type AnchorRect = { top: number; left: number; right: number; bottom: number; width: number; height: number };
 
@@ -14,9 +18,14 @@ interface Props {
 export function UserProfileCard({ userId, onClose, anchorRect }: Props) {
   const dispatch = useAppDispatch();
   const me = useAppSelector((s) => s.auth.user);
+  const activity = useAppSelector((s) => {
+    const gid = s.guilds.selectedId;
+    return gid ? s.presence.activityByGuild[gid]?.[userId] : undefined;
+  });
   const [user, setUser] = useState<APIPublicUser | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [copiedId, setCopiedId] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -62,7 +71,7 @@ export function UserProfileCard({ userId, onClose, anchorRect }: Props) {
     if (!user) return;
     setBusy(true);
     try {
-      await fetch('/api/v1/friends', {
+      await fetch(httpUrl('/api/v1/friends'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -80,7 +89,7 @@ export function UserProfileCard({ userId, onClose, anchorRect }: Props) {
     if (!user) return;
     setBusy(true);
     try {
-      await fetch(`/api/v1/friends/${user.id}/accept`, {
+      await fetch(httpUrl(`/api/v1/friends/${user.id}/accept`), {
         method: 'PUT',
         headers: { Authorization: 'Bearer ' + localStorage.getItem('sidcord_access') },
       });
@@ -103,8 +112,8 @@ export function UserProfileCard({ userId, onClose, anchorRect }: Props) {
       // Mesajsız DM olabilir; DMSidebar'a pinned olarak göster
       dispatch(setPendingDM({ channelId: channelID, partnerId: user.id }));
       onClose();
-    } catch (e) {
-      console.warn('open dm', e);
+    } catch (e: any) {
+      dispatch(addToast({ kind: 'error', message: e?.code === 'dm_restricted' ? 'Bu kullanıcı yalnızca arkadaşlarından mesaj alıyor' : 'DM açılamadı' }));
     } finally {
       setBusy(false);
     }
@@ -152,7 +161,7 @@ export function UserProfileCard({ userId, onClose, anchorRect }: Props) {
               style={{
                 background: user.banner_url
                   ? `url(${user.banner_url}) center/cover`
-                  : `linear-gradient(135deg, ${user.avatar_color}, ${user.avatar_color}80)`,
+                  : `linear-gradient(135deg, ${user.accent_color ?? user.avatar_color}, ${(user.accent_color ?? user.avatar_color)}80)`,
               }}
             />
             <div className="px-5 pb-5 -mt-10 relative">
@@ -170,6 +179,9 @@ export function UserProfileCard({ userId, onClose, anchorRect }: Props) {
                       statusColor[user.status]
                     }
                   />
+                  {user.avatar_decoration && (
+                    <span className="absolute -top-1 -right-1 text-lg drop-shadow" title="Avatar süslemesi" aria-label="Avatar süslemesi">{user.avatar_decoration}</span>
+                  )}
                 </div>
               </div>
 
@@ -182,11 +194,34 @@ export function UserProfileCard({ userId, onClose, anchorRect }: Props) {
                     </span>
                   )}
                 </h2>
-                <p className="text-sm text-ink-secondary">@{user.username}</p>
+                <p className="text-sm text-ink-secondary">
+                  @{user.username}
+                  {user.pronouns && <span className="text-ink-tertiary"> · {user.pronouns}</span>}
+                </p>
+                <ProfileBadges user={user} />
                 <div className="mt-2 flex items-center gap-1.5 text-xs">
                   <span className={'w-2 h-2 rounded-full ' + statusColor[user.status]} />
                   <span className="text-ink-tertiary">{statusLabel[user.status]}</span>
                 </div>
+
+                {(user.custom_status_text || user.custom_status_emoji) && (
+                  <p className="mt-2 text-sm text-ink-secondary">
+                    {user.custom_status_emoji ? user.custom_status_emoji + ' ' : ''}
+                    {user.custom_status_text}
+                  </p>
+                )}
+
+                {activity && (
+                  <div className="mt-3 bg-surface-2 border border-line rounded-xl px-3 py-2.5">
+                    <div className="text-[10px] font-bold uppercase text-ink-tertiary tracking-wider mb-0.5">
+                      {activityVerb(activity.type)}
+                    </div>
+                    <div className="text-sm font-semibold text-ink-primary truncate">{activity.name}</div>
+                    {activity.started_at && (
+                      <div className="text-xs text-ink-tertiary mt-0.5">{activityElapsed(activity.started_at)}</div>
+                    )}
+                  </div>
+                )}
 
                 {user.bio && (
                   <div className="mt-3 pt-3 border-t border-line">
@@ -194,6 +229,12 @@ export function UserProfileCard({ userId, onClose, anchorRect }: Props) {
                       Hakkımda
                     </h3>
                     <p className="text-sm text-ink-primary leading-snug">{user.bio}</p>
+                  </div>
+                )}
+
+                {user.connections && user.connections.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-line">
+                    <ConnectionChips connections={user.connections} />
                   </div>
                 )}
 
@@ -297,6 +338,41 @@ export function UserProfileCard({ userId, onClose, anchorRect }: Props) {
                         <UserPlus size={14} /> Arkadaş Ekle
                       </button>
                     )}
+                    {user.friendship_state !== 'blocked' && (
+                      <button
+                        onClick={async () => {
+                          if (!confirm(`${user.display_name} engellensin mi?`)) return;
+                          await api.block(user.id).catch(() => {});
+                          setUser({ ...user, friendship_state: 'blocked' });
+                        }}
+                        className="px-3 py-2 rounded-lg bg-surface-3 hover:bg-accent-500 hover:text-white text-ink-secondary text-xs font-semibold"
+                      >
+                        Engelle
+                      </button>
+                    )}
+                    {user.friendship_state !== 'self' && (
+                      <button
+                        onClick={() => {
+                          window.dispatchEvent(new CustomEvent('sidcord:mention-user', { detail: { id: user.id } }));
+                          onClose();
+                        }}
+                        title="Mesaj kutusunda bu kişiden bahset" aria-label="Mesaj kutusunda bu kişiden bahset"
+                        className="px-3 py-2 rounded-lg bg-surface-3 hover:bg-brand-500 hover:text-white text-ink-primary text-xs font-semibold"
+                      >
+                        Bahset
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        navigator.clipboard?.writeText(user.id);
+                        setCopiedId(true);
+                        setTimeout(() => setCopiedId(false), 1200);
+                      }}
+                      title="Kullanıcı kimliğini kopyala" aria-label="Kullanıcı kimliğini kopyala"
+                      className="px-3 py-2 rounded-lg bg-surface-3 hover:bg-surface-1 text-ink-secondary text-xs font-semibold"
+                    >
+                      {copiedId ? '✓ Kopyalandı' : 'ID Kopyala'}
+                    </button>
                   </div>
                 )}
               </div>

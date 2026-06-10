@@ -14,6 +14,8 @@ export function ChannelEditModal({ channel }: Props) {
   const [topic, setTopic] = useState(channel.topic ?? '');
   const [nsfw, setNsfw] = useState(channel.nsfw);
   const [rateLimit, setRateLimit] = useState(channel.rate_limit_sec);
+  const [userLimit, setUserLimit] = useState((channel as any).user_limit ?? 0);
+  const [bitrate, setBitrate] = useState(((channel as any).bitrate ?? 64000) / 1000);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -29,6 +31,9 @@ export function ChannelEditModal({ channel }: Props) {
         topic,
         nsfw,
         rate_limit_sec: rateLimit,
+        ...(isVoice
+          ? { user_limit: userLimit, bitrate: Math.round(bitrate * 1000) }
+          : {}),
       });
       await dispatch(fetchChannels(guildId));
       dispatch(closeModal());
@@ -97,6 +102,42 @@ export function ChannelEditModal({ channel }: Props) {
               />
               <span className="text-sm text-ink-primary">+18 (NSFW) içerik</span>
             </label>
+          </>
+        )}
+
+        {isVoice && (
+          <>
+            <label className="block text-sm font-semibold text-ink-primary mb-1.5">
+              Kullanıcı Limiti
+            </label>
+            <input
+              type="number"
+              min={0}
+              max={99}
+              value={userLimit}
+              onChange={(e) => setUserLimit(Math.min(99, Math.max(0, parseInt(e.target.value || '0', 10))))}
+              className="w-full bg-surface-2 border border-line focus:border-brand-500/50 focus:outline-none rounded-lg px-3 py-2.5 text-ink-primary mb-1"
+            />
+            <p className="text-xs text-ink-tertiary mb-4">
+              0 = sınırsız. Dolu kanala yalnızca "Üyeleri Taşı / Kanalları Yönet" yetkisi olanlar girebilir.
+            </p>
+
+            <label className="block text-sm font-semibold text-ink-primary mb-1.5">
+              Ses Kalitesi (bitrate) — {bitrate} kbps
+            </label>
+            <input
+              type="range"
+              min={8}
+              max={128}
+              step={4}
+              value={bitrate}
+              onChange={(e) => setBitrate(parseInt(e.target.value, 10))}
+              className="w-full accent-brand-500 mb-1"
+              aria-label="Ses bitrate"
+            />
+            <p className="text-xs text-ink-tertiary mb-4">
+              Yüksek değer daha iyi ses, daha çok bant genişliği. Varsayılan 64 kbps.
+            </p>
           </>
         )}
 

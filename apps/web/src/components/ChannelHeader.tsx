@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Hash, Volume2, Megaphone, MessagesSquare, Mic, Users, UserPlus, Bell, Search, AtSign, Pin, type LucideIcon } from 'lucide-react';
-import { useAppDispatch, useAppSelector, toggleMemberList, openModal, openProfileCard, selectChannel } from '../store';
+import { Hash, Volume2, Megaphone, MessagesSquare, Mic, Users, UserPlus, Bell, Search, AtSign, Pin, Clock, Menu, type LucideIcon } from 'lucide-react';
+import { useAppDispatch, useAppSelector, toggleMemberList, setMobileNav, openModal, openProfileCard, selectChannel, switchToGuild, switchToDM, selectDM } from '../store';
 import { api, type APIPublicUser } from '../api';
 
 const Icon: Record<string, LucideIcon> = {
@@ -21,6 +21,7 @@ export function ChannelHeader() {
     guildId && channelId ? s.channels.byGuild[guildId]?.find((c) => c.id === channelId) : null,
   );
   const showMembers = useAppSelector((s) => s.ui.showMemberList);
+  const memberCount = useAppSelector((s) => (guildId ? s.members.byGuild[guildId]?.length ?? 0 : 0));
   const dispatch = useAppDispatch();
   const Ico = mode === 'dm' ? AtSign : channel ? Icon[channel.type] ?? Hash : Hash;
 
@@ -48,33 +49,73 @@ export function ChannelHeader() {
   }, [mode, channelId, me]);
 
   return (
-    <header className="h-14 px-5 flex items-center gap-3 border-b border-line bg-bg">
-      <Ico size={20} className="text-ink-tertiary" />
+    <header className="h-14 px-3 md:px-5 flex items-center gap-2 md:gap-3 border-b border-line bg-bg">
+      <button
+        onClick={() => dispatch(setMobileNav(true))}
+        className="md:hidden w-8 h-8 -ml-1 rounded-lg flex items-center justify-center text-ink-secondary hover:bg-surface-2 shrink-0"
+        title="Menü" aria-label="Menü"
+      >
+        <Menu size={20} />
+      </button>
+      <Ico size={20} className="text-ink-tertiary shrink-0" />
       <div className="flex items-baseline gap-3 min-w-0">
         <h1 className="text-ink-primary font-semibold truncate">
           {mode === 'dm'
             ? dmPartner?.display_name ?? (channelId ? 'Yükleniyor...' : 'Bir konuşma seç')
             : channel?.name ?? '—'}
         </h1>
-        <span className="text-ink-tertiary text-xs hidden md:inline">
-          {mode === 'dm'
-            ? dmPartner
-              ? `@${dmPartner.username}`
-              : ''
-            : channel?.type === 'voice'
-              ? 'Sesli kanal'
-              : channel?.type === 'announcement'
-                ? 'Duyuru kanalı'
-                : 'Sohbet'}
-        </span>
+        {channel?.type === 'announcement' && (
+          <span className="text-[10px] font-bold uppercase tracking-wider bg-brand-500/15 text-brand-400 px-1.5 py-0.5 rounded shrink-0">
+            Duyuru
+          </span>
+        )}
+        {channel?.type === 'stage' && (
+          <span className="text-[10px] font-bold uppercase tracking-wider bg-accent-500/15 text-accent-400 px-1.5 py-0.5 rounded shrink-0">
+            🎙️ Sahne
+          </span>
+        )}
+        {channel && channel.rate_limit_sec > 0 && (
+          <span className="text-ink-tertiary text-[11px] flex items-center gap-0.5 shrink-0" title="Yavaş mod aktif" aria-label="Yavaş mod aktif">
+            <Clock size={12} /> {channel.rate_limit_sec}sn
+          </span>
+        )}
+        {channel?.topic ? (
+          <span className="text-ink-tertiary text-xs hidden md:inline truncate border-l border-line pl-3 max-w-md">
+            {channel.topic}
+          </span>
+        ) : (
+          <span className="text-ink-tertiary text-xs hidden md:inline">
+            {mode === 'dm'
+              ? dmPartner
+                ? `@${dmPartner.username}`
+                : ''
+              : channel?.type === 'voice'
+                ? 'Sesli kanal'
+                : channel?.type === 'announcement'
+                  ? 'Duyuru kanalı'
+                  : 'Sohbet'}
+          </span>
+        )}
       </div>
 
       <div className="ml-auto flex items-center gap-2">
+        {channel?.type === 'announcement' && (
+          <button
+            type="button"
+            onClick={() => dispatch(openModal('follow_channel'))}
+            title="Bu duyuru kanalını başka bir sunucudan takip et"
+            aria-label="Kanalı takip et"
+            className="h-9 px-3 rounded-lg bg-surface-2 hover:bg-surface-3 text-ink-secondary hover:text-ink-primary text-sm font-semibold flex items-center gap-1.5 transition-colors"
+          >
+            <Megaphone size={16} />
+            <span className="hidden md:inline">Takip Et</span>
+          </button>
+        )}
         {channelId && mode !== 'dm' && <ThreadsButton channelId={channelId} />}
         {channelId && mode !== 'dm' && <PinsButton channelId={channelId} />}
         <button
           onClick={() => dispatch(openModal('search'))}
-          title="Ara"
+          title="Ara" aria-label="Ara"
           className="w-9 h-9 rounded-lg flex items-center justify-center text-ink-secondary hover:bg-surface-2 hover:text-ink-primary transition-colors"
         >
           <Search size={18} />
@@ -84,7 +125,7 @@ export function ChannelHeader() {
           <button
             type="button"
             onClick={() => dispatch(openModal('invite_link'))}
-            title="Sunucuya davet bağlantısı oluştur"
+            title="Sunucuya davet bağlantısı oluştur" aria-label="Sunucuya davet bağlantısı oluştur"
             className="h-9 px-3 rounded-lg bg-brand-500 hover:bg-brand-400 text-white text-sm font-semibold flex items-center gap-1.5 transition-colors"
           >
             <UserPlus size={16} />
@@ -94,13 +135,17 @@ export function ChannelHeader() {
         <button
           type="button"
           onClick={() => dispatch(toggleMemberList())}
-          title="Üye listesini aç/kapat"
+          title={mode === 'dm' ? 'Profili aç/kapat' : 'Üye listesini aç/kapat'}
+          aria-label={mode === 'dm' ? 'Profili aç/kapat' : 'Üye listesini aç/kapat'}
           className={
-            'w-9 h-9 rounded-lg flex items-center justify-center transition-colors text-ink-secondary ' +
+            'h-9 px-2 min-w-9 rounded-lg flex items-center justify-center gap-1 transition-colors text-ink-secondary ' +
             (showMembers ? 'bg-brand-500/15 text-brand-500' : 'hover:bg-surface-2 hover:text-ink-primary')
           }
         >
           <Users size={18} />
+          {mode === 'guild' && memberCount > 0 && (
+            <span className="text-[11px] font-semibold">{memberCount}</span>
+          )}
         </button>
       </div>
     </header>
@@ -128,7 +173,13 @@ function NotificationsBell() {
   useEffect(() => {
     refreshCount();
     const t = setInterval(refreshCount, 15000);
-    return () => clearInterval(t);
+    // Gerçek-zamanlı: yeni bildirim gelince (App → gateway → window) anında tazele
+    function onNotif() { refreshCount(); }
+    window.addEventListener('sidcord:notification', onNotif);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener('sidcord:notification', onNotif);
+    };
   }, []);
 
   useEffect(() => {
@@ -145,7 +196,7 @@ function NotificationsBell() {
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        title="Bildirimler"
+        title="Bildirimler" aria-label="Bildirimler"
         className="w-9 h-9 rounded-lg flex items-center justify-center text-ink-secondary hover:bg-surface-2 hover:text-ink-primary transition-colors relative"
       >
         <Bell size={18} />
@@ -190,6 +241,13 @@ function NotificationItem({ n }: { n: import('../api').APINotification }) {
   // Mesaj veya mention bildirimine tıklayınca kanala git
   function goToMessage() {
     if (!n.channel_id) return;
+    // Çapraz-sunucu/DM jump: önce doğru sunucuya/DM'e geç
+    if (n.guild_id) {
+      dispatch(switchToGuild(n.guild_id));
+    } else {
+      dispatch(switchToDM());
+      dispatch(selectDM(n.channel_id));
+    }
     dispatch(selectChannel(n.channel_id));
     setTimeout(() => {
       if (n.message_id) {
@@ -200,7 +258,7 @@ function NotificationItem({ n }: { n: import('../api').APINotification }) {
           setTimeout(() => el.classList.remove('bg-brand-500/20'), 1500);
         }
       }
-    }, 300);
+    }, 600);
   }
 
   let title = '';
@@ -216,6 +274,10 @@ function NotificationItem({ n }: { n: import('../api').APINotification }) {
   } else if (n.type === 'reply') {
     title = `${actor} mesajına yanıt verdi`;
     body = n.message_preview ?? '';
+  } else if (n.type === 'reminder') {
+    title = '⏰ Hatırlatma';
+    const where = n.channel_name ? `#${n.channel_name}` : '';
+    body = n.message_preview ? `${where} — ${n.message_preview}` : (where || 'Kaydettiğin mesaj');
   } else {
     title = n.type;
     body = n.message_preview ?? '';
@@ -286,19 +348,28 @@ function PinsButton({ channelId }: { channelId: string }) {
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    api.channels.pins(channelId).then((p) => { setItems(p); setCount(p.length); }).catch(() => {});
+  }, [channelId]);
   useEffect(() => {
     if (!open) return;
-    api.channels.pins(channelId).then(setItems).catch(() => {});
+    api.channels.pins(channelId).then((p) => { setItems(p); setCount(p.length); }).catch(() => {});
   }, [open, channelId]);
 
   return (
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((v) => !v)}
-        title="Sabitlenmiş mesajlar"
-        className="w-9 h-9 rounded-lg flex items-center justify-center text-ink-secondary hover:bg-surface-2 hover:text-ink-primary transition-colors"
+        title="Sabitlenmiş mesajlar" aria-label="Sabitlenmiş mesajlar"
+        className="w-9 h-9 rounded-lg flex items-center justify-center text-ink-secondary hover:bg-surface-2 hover:text-ink-primary transition-colors relative"
       >
         <Pin size={18} />
+        {count > 0 && (
+          <span className="absolute -top-0.5 -right-0.5 min-w-[15px] h-[15px] px-1 rounded-full bg-brand-500 text-white text-[9px] font-bold flex items-center justify-center">
+            {count}
+          </span>
+        )}
       </button>
       {open && (
         <div className="absolute right-0 top-11 w-96 max-h-[500px] flex flex-col bg-surface-1 border border-line rounded-xl shadow-2xl z-30">
@@ -323,12 +394,7 @@ function PinsButton({ channelId }: { channelId: string }) {
                       onClick={() => {
                         setOpen(false);
                         setTimeout(() => {
-                          const el = document.getElementById('msg-' + m.id);
-                          if (el) {
-                            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                            el.classList.add('bg-brand-500/20');
-                            setTimeout(() => el.classList.remove('bg-brand-500/20'), 1500);
-                          }
+                          window.dispatchEvent(new CustomEvent('sidcord:jump-to-message', { detail: { messageId: m.id, channelId } }));
                         }, 100);
                       }}
                     >
@@ -358,7 +424,7 @@ function PinsButton({ channelId }: { channelId: string }) {
                             await api.messages.unpin(m.id).catch(() => {});
                             setItems((xs) => xs.filter((x) => x.id !== m.id));
                           }}
-                          title="Sabitlemeyi kaldır"
+                          title="Sabitlemeyi kaldır" aria-label="Sabitlemeyi kaldır"
                           className="text-ink-tertiary hover:text-accent-500 text-xs shrink-0"
                         >
                           ✕
@@ -399,7 +465,7 @@ function ThreadsButton({ channelId }: { channelId: string }) {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((v) => !v)}
-        title="Thread'ler"
+        title="Thread'ler" aria-label="Thread'ler"
         className="w-9 h-9 rounded-lg flex items-center justify-center text-ink-secondary hover:bg-surface-2 hover:text-ink-primary transition-colors"
       >
         <MessagesSquare size={18} />

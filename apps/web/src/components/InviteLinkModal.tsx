@@ -137,14 +137,14 @@ export function InviteLinkModal() {
               <button
                 onClick={() => copy(inv.code)}
                 className="w-9 h-9 rounded-lg bg-surface-3 hover:bg-brand-500 hover:text-white text-ink-secondary flex items-center justify-center transition-colors"
-                title="Kopyala"
+                title="Kopyala" aria-label="Kopyala"
               >
                 {copied === inv.code ? <Check size={16} /> : <Copy size={16} />}
               </button>
               <button
                 onClick={() => remove(inv.code)}
                 className="w-9 h-9 rounded-lg bg-surface-3 hover:bg-accent-500 hover:text-white text-ink-secondary flex items-center justify-center transition-colors"
-                title="Sil"
+                title="Sil" aria-label="Sil"
               >
                 <Trash2 size={16} />
               </button>

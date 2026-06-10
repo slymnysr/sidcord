@@ -1,8 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
-import { Paperclip, Send, X, FileIcon, Smile, AtSign, Sticker, Mic, Square } from 'lucide-react';
+import { httpUrl } from '../serverConfig';
+import { Paperclip, Send, X, FileIcon, Smile, AtSign, Sticker, Mic, Square, BarChart3, Clock, LayoutTemplate } from 'lucide-react';
+import { CreatePollModal } from './CreatePollModal';
+import { ScheduleMessageModal } from './ScheduleMessageModal';
+import { GifPicker } from './GifPicker';
+import { EmbedBuilderModal } from './EmbedBuilderModal';
 import { api } from '../api';
-import { useAppDispatch, useAppSelector, setReplyTo } from '../store';
-import { sendTyping } from '../gateway';
+import { useAppDispatch, useAppSelector, setReplyTo, addToast } from '../store';
+import { sendTyping, sendDMTyping } from '../gateway';
 import { EmojiPicker } from './EmojiPicker';
 import { MentionPicker } from './MentionPicker';
 import { MarkdownToolbar } from './MarkdownToolbar';
@@ -13,6 +18,7 @@ interface PendingFile {
   uploading: boolean;
   publicUrl?: string;
   error?: string;
+  spoiler?: boolean;
 }
 
 export function MessageInput() {
@@ -33,15 +39,39 @@ export function MessageInput() {
   const [dragOver, setDragOver] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [stickerOpen, setStickerOpen] = useState(false);
+  const [pollOpen, setPollOpen] = useState(false);
+  const [embedOpen, setEmbedOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [gifOpen, setGifOpen] = useState(false);
+  const [schedCount, setSchedCount] = useState(0);
   const [stickers, setStickers] = useState<Awaited<ReturnType<typeof api.stickers.list>>>([]);
+  const [commands, setCommands] = useState<Awaited<ReturnType<typeof api.commands.list>>>([]);
   const [recording, setRecording] = useState(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordingStartRef = useRef<number>(0);
   const [recordingDur, setRecordingDur] = useState(0);
   const [mention, setMention] = useState<{ type: '@' | '#' | ':' | '/'; q: string; start: number } | null>(null);
+  const [cooldownUntil, setCooldownUntil] = useState(0);
+  const [replyPing, setReplyPing] = useState(true);
+  const [nowTick, setNowTick] = useState(Date.now());
+  const cooldownLeft = Math.max(0, Math.ceil((cooldownUntil - nowTick) / 1000));
+  useEffect(() => {
+    if (cooldownUntil <= Date.now()) return;
+    const t = setInterval(() => setNowTick(Date.now()), 250);
+    return () => clearInterval(t);
+  }, [cooldownUntil]);
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const lastTyping = useRef(0);
+  const me = useAppSelector((s) => s.auth.user);
+  const lastOwnMsgId = useAppSelector((s) => {
+    if (!channelId) return null;
+    const list = s.messages.byChannel[channelId] ?? [];
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (list[i].author_id === me?.id) return list[i].id;
+    }
+    return null;
+  });
   const replyTo = useAppSelector((s) => s.ui.replyTo);
   const replyAuthor = useAppSelector((s) =>
     replyTo && channelId
@@ -49,6 +79,8 @@ export function MessageInput() {
       : null,
   );
   const replyAuthorUser = useAppSelector((s) => (replyAuthor ? s.users.byId[replyAuthor] : null));
+  // Her yeni yanıtta ping varsayılan olarak açık başlasın (Discord davranışı)
+  useEffect(() => { if (replyTo) setReplyPing(true); }, [replyTo]);
 
   useEffect(() => {
     setValue('');
@@ -56,10 +88,35 @@ export function MessageInput() {
     ref.current?.focus();
   }, [channelId]);
 
+  // Bu kanaldaki bekleyen zamanlanmış mesaj sayısı (saat butonu rozeti)
+  function refreshSchedCount() {
+    if (!channelId) { setSchedCount(0); return; }
+    api.scheduledMessages.list(channelId).then((l) => setSchedCount(l.length)).catch(() => setSchedCount(0));
+  }
+  useEffect(refreshSchedCount, [channelId]);
+
   useEffect(() => {
-    if (!guildId || !stickerOpen) return;
+    if (!guildId) { setStickers([]); return; }
+    // Hem picker hem yazarken-öneri için sunucu sticker'larını yükle
     api.stickers.list(guildId).then(setStickers).catch(() => {});
-  }, [stickerOpen, guildId]);
+  }, [guildId]);
+
+  useEffect(() => {
+    if (!guildId) { setCommands([]); return; }
+    api.commands.list(guildId).then(setCommands).catch(() => setCommands([]));
+  }, [guildId]);
+
+  // Profil kartından "Bahset" → kullanıcıyı composer'a ekle
+  useEffect(() => {
+    function onMention(e: Event) {
+      const id = (e as CustomEvent).detail?.id as string | undefined;
+      if (!id) return;
+      setValue((v) => (v ? v.replace(/\s*$/, ' ') : '') + `<@${id}> `);
+      ref.current?.focus();
+    }
+    window.addEventListener('sidcord:mention-user', onMention as EventListener);
+    return () => window.removeEventListener('sidcord:mention-user', onMention as EventListener);
+  }, []);
 
   async function sendSticker(url: string, name: string) {
     if (!channelId) return;
@@ -115,21 +172,72 @@ export function MessageInput() {
   }
 
   async function submit() {
-    const v = value.trim();
+    let v = value.trim();
     if (!v && files.length === 0) return;
     if (!channelId) return;
+    if (cooldownLeft > 0) return;
     if (files.some((f) => f.uploading)) return; // bekle
 
-    // Slash command algıla: /komut formatı
-    const slashMatch = v.match(/^\/([a-z0-9_-]+)\s*$/i);
+    // Discord paritesi: 2000+ karakterlik metni .txt dosyasına çevir
+    if (v.length > 2000) {
+      const txtFile = new File([v], 'mesaj.txt', { type: 'text/plain' });
+      setValue('');
+      await uploadFile(txtFile);
+      // Yükleme tamamlanınca kullanıcı "Gönder"e tekrar basar; ya da otomatik gönderim için
+      // dosya state'e eklendi, içerik temizlendi. Kullanıcıya bilgi ver.
+      dispatch(addToast({ kind: 'success', message: 'Uzun metin .txt dosyasına çevrildi — göndermek için tekrar gönder' }));
+      return;
+    }
+
+    // Dahili metin makroları (Discord paritesi): /shrug, /tableflip, /unflip, /me, /spoiler
+    const macro = v.match(/^\/(shrug|tableflip|unflip|me|spoiler)\b\s*([\s\S]*)$/i);
+    if (macro) {
+      const cmd = macro[1].toLowerCase();
+      const rest = macro[2] ?? '';
+      const art: Record<string, string> = {
+        shrug: '¯\\_(ツ)_/¯',
+        tableflip: '(╯°□°）╯︵ ┻━┻',
+        unflip: '┬─┬ ノ( ゜-゜ノ)',
+      };
+      if (cmd === 'me') v = rest ? `*${rest}*` : '';
+      else if (cmd === 'spoiler') v = rest ? `||${rest}||` : '';
+      else v = (rest ? rest + ' ' : '') + art[cmd];
+      if (!v) return;
+      // makro normal mesaj olarak gönderilir (slash kontrolünü atla)
+    } else {
+    // Slash command algıla: /komut [arg1 arg2 ...] formatı
+    const slashMatch = v.match(/^\/([a-z0-9_-]+)(?:\s+([\s\S]+))?$/i);
     if (slashMatch) {
-      try {
-        await api.commands.run(channelId, slashMatch[1]);
-        setValue('');
-        return;
-      } catch (e: any) {
-        // 404 → tanımlı değil, normal mesaj olarak devam et
+      const cmdName = slashMatch[1].toLowerCase();
+      const rest = (slashMatch[2] ?? '').trim();
+      const cmd = commands.find((c) => c.name.toLowerCase() === cmdName);
+      if (cmd) {
+        // Pozisyonel argümanları opsiyon isimlerine eşle (son opsiyon kalanı alır)
+        const args: Record<string, string> = {};
+        const opts = cmd.options ?? [];
+        if (opts.length > 0 && rest) {
+          const parts = rest.split(/\s+/);
+          opts.forEach((o, i) => {
+            if (i === opts.length - 1) args[o.name] = parts.slice(i).join(' ');
+            else args[o.name] = parts[i] ?? '';
+          });
+        }
+        // Zorunlu argüman eksikse uyar, normal mesaj olarak gönderme
+        const missing = opts.find((o) => o.required && !args[o.name]?.trim());
+        if (missing) {
+          dispatch(addToast({ kind: 'error', message: `/${cmdName}: '${missing.name}' argümanı gerekli` }));
+          return;
+        }
+        try {
+          await api.commands.run(channelId, cmdName, args);
+          setValue('');
+          return;
+        } catch {
+          /* hata → normal mesaj olarak devam etme, sessiz geç */
+          return;
+        }
       }
+    }
     }
 
     setSending(true);
@@ -139,11 +247,11 @@ export function MessageInput() {
     try {
       const attachments = okFiles.map((f) => ({
         url: f.publicUrl!,
-        filename: f.file.name,
+        filename: f.spoiler && !/^SPOILER_/i.test(f.file.name) ? `SPOILER_${f.file.name}` : f.file.name,
         content_type: f.file.type,
         size_bytes: f.file.size,
       }));
-      const msg = await fetch(`/api/v1/channels/${channelId}/messages`, {
+      const msg = await fetch(httpUrl(`/api/v1/channels/${channelId}/messages`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -153,10 +261,13 @@ export function MessageInput() {
           content: v || ' ',
           attachments: attachments.length ? attachments : undefined,
           replied_to_id: replyTo ?? undefined,
+          reply_ping: replyTo ? replyPing : undefined,
         }),
       }).then((r) => r.json());
       if (msg && msg.id) {
         dispatch({ type: 'messages/send/fulfilled', payload: msg, meta: { arg: { channelId, content: v } } });
+        const rl = channel && 'rate_limit_sec' in channel ? channel.rate_limit_sec : 0;
+        if (rl) setCooldownUntil(Date.now() + rl * 1000);
       }
       dispatch(setReplyTo(null));
     } catch {
@@ -189,9 +300,10 @@ export function MessageInput() {
     const v = e.target.value;
     setValue(v);
     const now = Date.now();
-    if (guildId && channelId && now - lastTyping.current > 4000) {
+    if (channelId && now - lastTyping.current > 4000) {
       lastTyping.current = now;
-      sendTyping(guildId, channelId);
+      if (guildId) sendTyping(guildId, channelId);
+      else sendDMTyping(channelId); // DM modu
     }
     // @username, #channel, :emoji, /slash için trigger algıla
     const pos = e.target.selectionStart ?? v.length;
@@ -294,6 +406,13 @@ export function MessageInput() {
     });
   }
 
+  // Sticker önerisi: kısa tek kelime yazılınca eşleşen sticker'ları öner (Discord paritesi)
+  const stickerSuggestions = (() => {
+    const v = value.trim().toLowerCase();
+    if (v.length < 2 || v.length > 20 || /\s/.test(v) || stickerOpen || mention) return [];
+    return stickers.filter((s) => s.name.toLowerCase().includes(v)).slice(0, 6);
+  })();
+
   return (
     <div
       className="px-6 pb-6 pt-2"
@@ -308,6 +427,35 @@ export function MessageInput() {
         onPickFiles(e.dataTransfer.files);
       }}
     >
+      {pollOpen && channelId && (
+        <CreatePollModal channelId={channelId} onClose={() => setPollOpen(false)} />
+      )}
+      {embedOpen && channelId && (
+        <EmbedBuilderModal channelId={channelId} onClose={() => setEmbedOpen(false)} />
+      )}
+      {scheduleOpen && channelId && (
+        <ScheduleMessageModal
+          channelId={channelId}
+          initialContent={value}
+          onClose={() => { setScheduleOpen(false); refreshSchedCount(); }}
+          onScheduled={() => { setValue(''); refreshSchedCount(); }}
+        />
+      )}
+      {stickerSuggestions.length > 0 && (
+        <div className="mb-2 bg-surface-1 border border-line rounded-xl p-2 flex items-center gap-2 overflow-x-auto">
+          <span className="text-[10px] uppercase font-bold text-ink-tertiary shrink-0 px-1">Sticker</span>
+          {stickerSuggestions.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => { sendSticker(s.url, s.name); setValue(''); }}
+              title={s.name}
+              className="shrink-0 w-12 h-12 rounded-lg bg-surface-2 hover:bg-surface-3 hover:ring-2 hover:ring-brand-500 p-1 flex items-center justify-center transition"
+            >
+              <img src={s.url} alt={s.name} className="max-w-full max-h-full object-contain" />
+            </button>
+          ))}
+        </div>
+      )}
       {replyTo && (
         <div className="bg-surface-2 border border-line border-b-0 rounded-t-xl px-4 py-2 flex items-center justify-between text-xs">
           <span className="text-ink-secondary truncate">
@@ -316,13 +464,28 @@ export function MessageInput() {
               @{replyAuthorUser?.display_name ?? '…'}
             </span>
           </span>
-          <button
-            type="button"
-            onClick={() => dispatch(setReplyTo(null))}
-            className="text-ink-tertiary hover:text-accent-500"
-          >
-            <X size={14} />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setReplyPing((v) => !v)}
+              title={replyPing ? 'Bahsetme açık — yazara bildirim gider' : 'Bahsetme kapalı — sessiz yanıt'}
+              className={
+                'px-2 py-0.5 rounded font-semibold text-[11px] transition-colors ' +
+                (replyPing
+                  ? 'bg-brand-500/20 text-brand-500'
+                  : 'bg-surface-3 text-ink-tertiary hover:text-ink-secondary')
+              }
+            >
+              @ {replyPing ? 'AÇIK' : 'KAPALI'}
+            </button>
+            <button
+              type="button"
+              onClick={() => dispatch(setReplyTo(null))}
+              className="text-ink-tertiary hover:text-accent-500"
+            >
+              <X size={14} />
+            </button>
+          </div>
         </div>
       )}
 
@@ -340,7 +503,12 @@ export function MessageInput() {
         {files.length > 0 && (
           <div className="px-4 pt-3 flex flex-wrap gap-2 border-b border-line pb-3">
             {files.map((f) => (
-              <FilePreview key={f.id} file={f} onRemove={() => removeFile(f.id)} />
+              <FilePreview
+                key={f.id}
+                file={f}
+                onRemove={() => removeFile(f.id)}
+                onToggleSpoiler={() => setFiles((fs) => fs.map((x) => (x.id === f.id ? { ...x, spoiler: !x.spoiler } : x)))}
+              />
             ))}
           </div>
         )}
@@ -357,7 +525,7 @@ export function MessageInput() {
             type="button"
             onClick={() => fileInput.current?.click()}
             className="text-ink-secondary hover:text-brand-500 transition-colors shrink-0"
-            title="Dosya ekle"
+            title="Dosya ekle" aria-label="Dosya ekle"
           >
             <Paperclip size={20} />
           </button>
@@ -381,11 +549,18 @@ export function MessageInput() {
               if (e.key === 'Escape' && replyTo) {
                 dispatch(setReplyTo(null));
               }
+              // ↑ boş kutuda → son kendi mesajını düzenle (Discord paritesi)
+              if (e.key === 'ArrowUp' && !value && !mention && lastOwnMsgId) {
+                e.preventDefault();
+                window.dispatchEvent(new CustomEvent('sidcord:edit-message', { detail: { id: lastOwnMsgId } }));
+              }
             }}
             placeholder={
-              replyTo
-                ? `Yanıtla #${channel.name}...`
-                : `#${channel.name} kanalına yaz...`
+              cooldownLeft > 0
+                ? `Yavaş mod — ${cooldownLeft} sn bekle...`
+                : replyTo
+                  ? `Yanıtla #${channel.name}...`
+                  : `#${channel.name} kanalına yaz...`
             }
             rows={1}
             disabled={sending}
@@ -405,16 +580,63 @@ export function MessageInput() {
               }
             }}
             className="text-ink-secondary hover:text-brand-500 transition-colors shrink-0"
-            title="Birini bahset"
+            title="Birini bahset" aria-label="Birini bahset"
           >
             <AtSign size={18} />
           </button>
+          <button
+            type="button"
+            onClick={() => setPollOpen(true)}
+            className="text-ink-secondary hover:text-brand-500 transition-colors shrink-0"
+            title="Anket oluştur" aria-label="Anket oluştur"
+          >
+            <BarChart3 size={19} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setEmbedOpen(true)}
+            className="text-ink-secondary hover:text-brand-500 transition-colors shrink-0"
+            title="Zengin embed oluştur" aria-label="Zengin embed oluştur"
+          >
+            <LayoutTemplate size={19} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setScheduleOpen(true)}
+            className="text-ink-secondary hover:text-brand-500 transition-colors shrink-0 relative"
+            title={schedCount > 0 ? `${schedCount} zamanlanmış mesaj` : 'Mesaj zamanla'}
+          >
+            <Clock size={19} />
+            {schedCount > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-brand-500 text-white text-[9px] font-bold flex items-center justify-center">
+                {schedCount}
+              </span>
+            )}
+          </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setGifOpen((v) => !v)}
+              className="text-ink-secondary hover:text-brand-500 transition-colors shrink-0 font-bold text-[11px] border border-current rounded px-1 leading-tight"
+              title="GIF" aria-label="GIF"
+            >
+              GIF
+            </button>
+            {gifOpen && channelId && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setGifOpen(false)} />
+                <div className="absolute bottom-9 right-0 z-20">
+                  <GifPicker channelId={channelId} onClose={() => setGifOpen(false)} />
+                </div>
+              </>
+            )}
+          </div>
           <div className="relative">
             <button
               type="button"
               onClick={() => setStickerOpen((v) => !v)}
               className="text-ink-secondary hover:text-brand-500 transition-colors shrink-0"
-              title="Sticker"
+              title="Sticker" aria-label="Sticker"
             >
               <Sticker size={20} />
             </button>
@@ -455,7 +677,7 @@ export function MessageInput() {
               type="button"
               onClick={() => setEmojiOpen((v) => !v)}
               className="text-ink-secondary hover:text-brand-500 transition-colors shrink-0"
-              title="Emoji"
+              title="Emoji" aria-label="Emoji"
             >
               <Smile size={20} />
             </button>
@@ -479,7 +701,7 @@ export function MessageInput() {
               type="button"
               onClick={stopRecording}
               className="h-9 px-3 rounded-xl bg-accent-500 hover:bg-accent-600 text-white flex items-center gap-2 transition-colors shrink-0 animate-pulse"
-              title="Kaydı durdur ve gönder"
+              title="Kaydı durdur ve gönder" aria-label="Kaydı durdur ve gönder"
             >
               <Square size={14} />
               <span className="text-xs font-mono">{Math.floor(recordingDur / 60)}:{String(recordingDur % 60).padStart(2, '0')}</span>
@@ -489,22 +711,27 @@ export function MessageInput() {
               type="button"
               onClick={startRecording}
               className="text-ink-secondary hover:text-brand-500 transition-colors shrink-0"
-              title="Sesli mesaj"
+              title="Sesli mesaj" aria-label="Sesli mesaj"
             >
               <Mic size={20} />
             </button>
           )}
           <button
             onClick={submit}
-            disabled={(!value.trim() && files.length === 0) || sending || files.some((f) => f.uploading)}
+            disabled={(!value.trim() && files.length === 0) || sending || cooldownLeft > 0 || files.some((f) => f.uploading)}
             className="w-9 h-9 rounded-xl bg-brand-500 disabled:bg-surface-3 disabled:text-ink-tertiary text-white flex items-center justify-center hover:bg-brand-400 disabled:hover:bg-surface-3 transition-colors shrink-0"
-            title="Gönder"
+            title="Gönder" aria-label="Gönder"
           >
-            <Send size={16} strokeWidth={2.5} />
+            {cooldownLeft > 0 ? <span className="text-[11px] font-bold">{cooldownLeft}</span> : <Send size={16} strokeWidth={2.5} />}
           </button>
         </div>
       </div>
-      <div className="text-[11px] text-ink-tertiary mt-2 px-1">
+      <div className="text-[11px] text-ink-tertiary mt-2 px-1 flex items-center">
+        {value.length > 1500 && (
+          <span className={'mr-2 font-semibold ' + (value.length > 2000 ? 'text-accent-500' : 'text-ink-secondary')}>
+            {value.length}/2000
+          </span>
+        )}
         <kbd className="px-1.5 py-0.5 bg-surface-2 rounded text-[10px] text-ink-secondary mr-1">Enter</kbd>
         gönder ·
         <kbd className="px-1.5 py-0.5 bg-surface-2 rounded text-[10px] text-ink-secondary mx-1">Shift</kbd>+
@@ -515,20 +742,34 @@ export function MessageInput() {
   );
 }
 
-function FilePreview({ file, onRemove }: { file: PendingFile; onRemove: () => void }) {
+function FilePreview({ file, onRemove, onToggleSpoiler }: { file: PendingFile; onRemove: () => void; onToggleSpoiler?: () => void }) {
   const isImage = file.file.type.startsWith('image/');
   const preview = isImage ? URL.createObjectURL(file.file) : null;
   return (
     <div className="relative bg-surface-3 rounded-lg border border-line p-2 max-w-[220px]">
-      <button
-        onClick={onRemove}
-        className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-accent-500 text-white flex items-center justify-center"
-        title="Kaldır"
-      >
-        <X size={12} />
-      </button>
+      <div className="absolute -top-1.5 -right-1.5 flex gap-1">
+        {onToggleSpoiler && (
+          <button
+            onClick={onToggleSpoiler}
+            className={'w-5 h-5 rounded-full flex items-center justify-center text-[10px] ' + (file.spoiler ? 'bg-brand-500 text-white' : 'bg-surface-1 text-ink-secondary border border-line')}
+            title={file.spoiler ? 'Spoiler işaretini kaldır' : 'Spoiler olarak işaretle'}
+          >
+            {file.spoiler ? '🙈' : '👁'}
+          </button>
+        )}
+        <button
+          onClick={onRemove}
+          className="w-5 h-5 rounded-full bg-accent-500 text-white flex items-center justify-center"
+          title="Kaldır" aria-label="Kaldır"
+        >
+          <X size={12} />
+        </button>
+      </div>
       {preview ? (
-        <img src={preview} alt={file.file.name} className="w-32 h-32 object-cover rounded" />
+        <div className="relative">
+          <img src={preview} alt={file.file.name} className={'w-32 h-32 object-cover rounded ' + (file.spoiler ? 'blur-md' : '')} />
+          {file.spoiler && <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold uppercase text-white tracking-wider">Spoiler</span>}
+        </div>
       ) : (
         <div className="w-32 h-32 flex flex-col items-center justify-center text-ink-secondary">
           <FileIcon size={32} />

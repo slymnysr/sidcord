@@ -4,6 +4,20 @@ import path from 'node:path';
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        // Sabit bağımlılıkları ayrı 'vendor' chunk'larına al (tarayıcı önbelleği için)
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('mediasoup-client')) return 'vendor-voice';
+            if (id.includes('/react') || id.includes('redux') || id.includes('@reduxjs') || id.includes('scheduler')) return 'vendor-react';
+            return 'vendor';
+          }
+        },
+      },
+    },
+  },
   server: {
     port: 3000,
     proxy: {

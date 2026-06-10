@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { MessageSquare, User, AtSign, UserMinus, Ban as BanIcon, Clock } from 'lucide-react';
+import { MessageSquare, User, AtSign, UserMinus, Ban as BanIcon, Clock, Shield, Copy, Check, ChevronRight, Search, Pencil } from 'lucide-react';
+import { activityLabel } from '../activity';
 import {
   useAppDispatch,
   useAppSelector,
@@ -8,8 +9,10 @@ import {
   selectDM,
   selectChannel,
   setPendingDM,
+  fetchMembers,
+  addToast,
 } from '../store';
-import { api, type APIMember } from '../api';
+import { api, type APIMember, type APIRole } from '../api';
 
 export function MemberList() {
   const guildId = useAppSelector((s) => s.guilds.selectedId);
@@ -19,8 +22,18 @@ export function MemberList() {
   const onlineIds = useAppSelector((s) => (guildId ? s.presence.onlineByGuild[guildId] ?? [] : []));
 
   const onlineSet = useMemo(() => new Set(onlineIds), [onlineIds]);
+  const [query, setQuery] = useState('');
+  const [hideOffline, setHideOffline] = useState(() => localStorage.getItem('sidcord_hide_offline') === '1');
 
   if (!guildId) return null;
+
+  const q = query.trim().toLowerCase();
+  const searchResults = q
+    ? members.filter(
+        (m) =>
+          m.display_name?.toLowerCase().includes(q) || (m as any).username?.toLowerCase?.().includes(q),
+      )
+    : null;
 
   // Discord davranışı: hoist=true rollere göre üyeleri grupla
   // Her üye en yüksek hoist rolüne göre kümelenir
@@ -54,12 +67,38 @@ export function MemberList() {
 
   return (
     <aside className="w-60 bg-surface-1 border-l border-line overflow-y-auto py-3">
+      <div className="px-3 pb-2 -mt-3 pt-3 mb-1 sticky top-0 z-10 bg-surface-1">
+        <div className="relative">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-tertiary" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Üye ara"
+            className="w-full bg-surface-2 border border-line rounded-md pl-8 pr-2 py-1.5 text-sm text-ink-primary placeholder:text-ink-tertiary focus:outline-none focus:border-brand-500/50"
+          />
+        </div>
+      </div>
+
       {members.length === 0 && (
         <p className="px-4 text-sm text-ink-tertiary text-center py-6">
           Üye listesi yükleniyor...
         </p>
       )}
 
+      {/* Arama modu: düz filtrelenmiş liste */}
+      {searchResults !== null ? (
+        searchResults.length === 0 ? (
+          <p className="px-4 text-sm text-ink-tertiary text-center py-6">Eşleşen üye yok.</p>
+        ) : (
+          <Group
+            label="Arama Sonuçları"
+            count={searchResults.length}
+            members={searchResults}
+            online
+          />
+        )
+      ) : (
+      <>
       {roleBuckets.map((b) => (
         <Group
           key={b.role.id}
@@ -79,7 +118,18 @@ export function MemberList() {
         />
       )}
       {offlineMembers.length > 0 && (
-        <Group label="Çevrimdışı" count={offlineMembers.length} members={offlineMembers} online={false} />
+        <>
+          <button
+            onClick={() => { const n = !hideOffline; setHideOffline(n); localStorage.setItem('sidcord_hide_offline', n ? '1' : '0'); }}
+            className="w-full px-3 mt-2 mb-1 text-[11px] font-bold text-ink-tertiary uppercase tracking-[0.08em] hover:text-ink-secondary flex items-center justify-between"
+          >
+            <span>Çevrimdışı — {offlineMembers.length}</span>
+            <span>{hideOffline ? 'Göster' : 'Gizle'}</span>
+          </button>
+          {!hideOffline && <Group label="" count={offlineMembers.length} members={offlineMembers} online={false} />}
+        </>
+      )}
+      </>
       )}
     </aside>
   );
@@ -100,13 +150,15 @@ function Group({
 }) {
   return (
     <section className="mb-5">
-      <div
-        className="px-4 mb-2 text-[11px] font-bold uppercase tracking-[0.08em] flex items-center justify-between"
-        style={{ color: color ?? undefined }}
-      >
-        <span className={color ? '' : 'text-ink-tertiary'}>{label}</span>
-        <span className="text-ink-muted">{count}</span>
-      </div>
+      {label !== '' && (
+        <div
+          className="px-4 mb-2 text-[11px] font-bold uppercase tracking-[0.08em] flex items-center justify-between"
+          style={{ color: color ?? undefined }}
+        >
+          <span className={color ? '' : 'text-ink-tertiary'}>{label}</span>
+          <span className="text-ink-muted">{count}</span>
+        </div>
+      )}
       <ul className="px-2 space-y-0.5">
         {members.map((m) => (
           <MemberRow key={m.user_id} m={m} online={online} />
@@ -119,6 +171,22 @@ function Group({
 function MemberRow({ m, online }: { m: APIMember; online: boolean }) {
   const dispatch = useAppDispatch();
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const roles = useAppSelector((s) => s.guildRoles?.byGuild?.[m.guild_id] ?? []);
+  const activity = useAppSelector((s) => s.presence.activityByGuild[m.guild_id]?.[m.user_id]);
+  const liveStatus = useAppSelector((s) => s.presence.statusByGuild[m.guild_id]?.[m.user_id]);
+  const topColor = useMemo(() => {
+    const mine = roles.filter((r: any) => !r.is_everyone && m.role_ids?.includes(r.id) && r.color);
+    if (mine.length === 0) return null;
+    mine.sort((a: any, b: any) => b.position - a.position);
+    return '#' + (mine[0].color as number).toString(16).padStart(6, '0');
+  }, [roles, m.role_ids]);
+  // En yüksek ikonu olan rolün ikonu (isim yanında gösterilir)
+  const topIcon = useMemo(() => {
+    const mine = roles.filter((r: any) => !r.is_everyone && m.role_ids?.includes(r.id) && r.icon);
+    if (mine.length === 0) return null;
+    mine.sort((a: any, b: any) => b.position - a.position);
+    return mine[0].icon as string;
+  }, [roles, m.role_ids]);
 
   return (
     <li>
@@ -131,38 +199,70 @@ function MemberRow({ m, online }: { m: APIMember; online: boolean }) {
           e.preventDefault();
           setMenu({ x: e.clientX, y: e.clientY });
         }}
+        title={
+          roles
+            .filter((r: any) => !r.is_everyone && m.role_ids?.includes(r.id))
+            .map((r: any) => r.name)
+            .join(', ') || undefined
+        }
         className="w-full px-2 py-1.5 rounded-md hover:bg-surface-2 flex items-center gap-3 text-left transition-colors"
       >
         <div className="relative shrink-0">
           <div
             className={
-              'w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold ' +
+              'w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold overflow-hidden ' +
               (online ? '' : 'opacity-40')
             }
             style={{ backgroundColor: m.avatar_color }}
           >
-            {(m.nickname ?? m.display_name).slice(0, 1).toUpperCase()}
+            {m.guild_avatar_url ? (
+              <img src={m.guild_avatar_url} alt="" className="w-full h-full object-cover" />
+            ) : (
+              (m.nickname ?? m.display_name).slice(0, 1).toUpperCase()
+            )}
           </div>
           <span
             className={
               'absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full ring-2 ring-surface-1 ' +
-              (online ? 'bg-status-online' : 'bg-status-offline')
+              (!online
+                ? 'bg-status-offline'
+                : liveStatus === 'idle'
+                  ? 'bg-status-idle'
+                  : liveStatus === 'dnd'
+                    ? 'bg-status-dnd'
+                    : 'bg-status-online')
             }
           />
         </div>
-        <div className="min-w-0 flex-1 flex items-center gap-1.5">
-          <span
-            className={
-              'text-sm truncate font-medium ' +
-              (online ? 'text-ink-primary' : 'text-ink-tertiary')
-            }
-          >
-            {m.nickname ?? m.display_name}
-          </span>
-          {m.bot && (
-            <span className="bg-brand-500/15 text-brand-500 text-[9px] font-semibold px-1 rounded">
-              BOT
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <span
+              className={
+                'text-sm truncate font-medium ' +
+                (topColor ? '' : online ? 'text-ink-primary' : 'text-ink-tertiary')
+              }
+              style={topColor ? { color: topColor, opacity: online ? 1 : 0.5 } : undefined}
+            >
+              {m.nickname ?? m.display_name}
             </span>
+            {topIcon && (
+              topIcon.startsWith('http')
+                ? <img src={topIcon} alt="" className="w-3.5 h-3.5 object-contain shrink-0" />
+                : <span className="text-xs shrink-0" title="Rol ikonu" aria-label="Rol ikonu">{topIcon}</span>
+            )}
+            {m.bot && (
+              <span className="bg-brand-500/15 text-brand-500 text-[9px] font-semibold px-1 rounded">
+                BOT
+              </span>
+            )}
+            {m.timeout_until && new Date(m.timeout_until) > new Date() && (
+              <Clock size={12} className="text-yellow-400 shrink-0" />
+            )}
+          </div>
+          {online && activity && (
+            <div className="text-[11px] text-ink-tertiary truncate" title={activityLabel(activity)}>
+              {activityLabel(activity)}
+            </div>
           )}
         </div>
       </button>
@@ -209,7 +309,9 @@ function MemberContextMenu({
       dispatch(selectDM(r.channel_id));
       dispatch(selectChannel(r.channel_id));
       dispatch(setPendingDM({ channelId: r.channel_id, partnerId: m.user_id }));
-    } catch {}
+    } catch (e: any) {
+      dispatch(addToast({ kind: 'error', message: e?.code === 'dm_restricted' ? 'Bu kullanıcı yalnızca arkadaşlarından mesaj alıyor' : 'DM açılamadı' }));
+    }
     onClose();
   }
 
@@ -230,7 +332,10 @@ function MemberContextMenu({
       onClose();
       return;
     }
-    await api.guilds.ban(guildId, m.user_id, reason).catch(() => {});
+    // Discord paritesi: banla birlikte son mesajları silme seçeneği
+    const hoursStr = prompt('Son kaç saatlik mesajları silinsin? (0 = silme, en fazla 168)', '0');
+    const hours = Math.min(168, Math.max(0, parseInt(hoursStr ?? '0', 10) || 0));
+    await api.guilds.ban(guildId, m.user_id, reason, hours).catch(() => {});
     onClose();
   }
 
@@ -243,6 +348,61 @@ function MemberContextMenu({
     }
     const sec = parseInt(mins, 10) * 60;
     if (sec > 0) await api.guilds.timeout(guildId, m.user_id, sec).catch(() => {});
+    onClose();
+  }
+
+  const [rolesOpen, setRolesOpen] = useState(false);
+  const [roles, setRoles] = useState<APIRole[]>([]);
+  const [memberRoles, setMemberRoles] = useState<Set<string>>(new Set(m.role_ids ?? []));
+
+  useEffect(() => {
+    if (!rolesOpen || !guildId || roles.length > 0) return;
+    api.guilds.roles(guildId).then((rs) => setRoles(rs.filter((r) => !r.is_everyone))).catch(() => {});
+  }, [rolesOpen, guildId, roles.length]);
+
+  async function toggleRole(roleId: string) {
+    if (!guildId) return;
+    const has = memberRoles.has(roleId);
+    // İyimser güncelle
+    setMemberRoles((prev) => {
+      const next = new Set(prev);
+      if (has) next.delete(roleId);
+      else next.add(roleId);
+      return next;
+    });
+    try {
+      if (has) await api.guilds.unassignRole(guildId, m.user_id, roleId);
+      else await api.guilds.assignRole(guildId, m.user_id, roleId);
+      dispatch(fetchMembers(guildId));
+    } catch {
+      // hata: geri al
+      setMemberRoles((prev) => {
+        const next = new Set(prev);
+        if (has) next.add(roleId);
+        else next.delete(roleId);
+        return next;
+      });
+    }
+  }
+
+  function copyId() {
+    navigator.clipboard?.writeText(m.user_id).catch(() => {});
+    onClose();
+  }
+
+  async function changeNick() {
+    if (!guildId) return;
+    const next = prompt('Takma ad (boş = sıfırla):', m.nickname ?? '');
+    if (next === null) {
+      onClose();
+      return;
+    }
+    try {
+      await api.guilds.setNickname(guildId, m.user_id, next.trim());
+      dispatch(fetchMembers(guildId));
+    } catch {
+      /* sessiz */
+    }
     onClose();
   }
 
@@ -268,6 +428,7 @@ function MemberContextMenu({
             onClose();
           }}
         />
+        <Item icon={<Pencil size={14} />} label="Takma Ad Değiştir" onClick={changeNick} />
         {!isMe && <Item icon={<MessageSquare size={14} />} label="Mesaj" onClick={openDM} />}
         {!isMe && (
           <Item
@@ -285,11 +446,47 @@ function MemberContextMenu({
         {!isMe && (
           <>
             <div className="my-1 h-px bg-line" />
+            {/* Rolleri Yönet — açılır alt liste */}
+            <button
+              onClick={() => setRolesOpen((v) => !v)}
+              className="w-full text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2.5 text-ink-primary hover:bg-surface-2 transition-colors"
+            >
+              <span className="text-ink-tertiary"><Shield size={14} /></span>
+              <span className="font-medium flex-1">Rolleri Yönet</span>
+              <ChevronRight size={13} className={'text-ink-tertiary transition-transform ' + (rolesOpen ? 'rotate-90' : '')} />
+            </button>
+            {rolesOpen && (
+              <div className="max-h-44 overflow-y-auto bg-surface-2 rounded-lg mx-1 my-1 p-1">
+                {roles.length === 0 ? (
+                  <p className="text-xs text-ink-tertiary px-2 py-1.5">Rol yok.</p>
+                ) : (
+                  roles.map((r) => {
+                    const has = memberRoles.has(r.id);
+                    return (
+                      <button
+                        key={r.id}
+                        onClick={() => toggleRole(r.id)}
+                        className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-surface-3 text-left"
+                      >
+                        <span
+                          className="w-2.5 h-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: '#' + (r.color as number).toString(16).padStart(6, '0') }}
+                        />
+                        <span className="text-sm text-ink-primary truncate flex-1">{r.name}</span>
+                        {has && <Check size={13} className="text-brand-500 shrink-0" />}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
             <Item icon={<Clock size={14} />} label="Zaman Aşımı (Timeout)" onClick={timeoutMember} />
             <Item icon={<UserMinus size={14} />} label="Sunucudan At" danger onClick={kick} />
             <Item icon={<BanIcon size={14} />} label="Yasakla" danger onClick={ban} />
           </>
         )}
+        <div className="my-1 h-px bg-line" />
+        <Item icon={<Copy size={14} />} label="Kullanıcı ID'sini Kopyala" onClick={copyId} />
       </div>
     </div>
   );

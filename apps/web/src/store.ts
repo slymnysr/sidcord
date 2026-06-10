@@ -1,6 +1,33 @@
 import { configureStore, createSlice, createAsyncThunk, type PayloadAction } from '@reduxjs/toolkit';
 import { useDispatch, useSelector, type TypedUseSelectorHook } from 'react-redux';
 import { api, type APIUser, type APIGuild, type APIChannel, type APIMessage, type APIMember, type APIReaction, type APIReadState } from './api';
+import { httpUrl } from './serverConfig';
+
+// ===== NAVIGASYON KALICILIĞI (F5 sonrası kaldığın yerden devam) =====
+interface NavSnapshot {
+  mode: 'guild' | 'dm' | 'discover';
+  guildId: string | null;
+  channelId: string | null;
+  dmChannelId: string | null;
+}
+function loadNav(): NavSnapshot {
+  try {
+    const raw = localStorage.getItem('sidcord_nav');
+    if (raw) {
+      const n = JSON.parse(raw);
+      return {
+        mode: n.mode === 'dm' ? 'dm' : n.mode === 'discover' ? 'discover' : 'guild',
+        guildId: n.guildId ?? null,
+        channelId: n.channelId ?? null,
+        dmChannelId: n.dmChannelId ?? null,
+      };
+    }
+  } catch {
+    /* yoksay */
+  }
+  return { mode: 'guild', guildId: null, channelId: null, dmChannelId: null };
+}
+const NAV = loadNav();
 
 // ===== AUTH =====
 interface AuthState {
@@ -11,11 +38,15 @@ interface AuthState {
 
 export const loginThunk = createAsyncThunk(
   'auth/login',
-  async (input: { email: string; password: string }, { rejectWithValue }) => {
+  async (input: { email: string; password: string; totp_code?: string }, { rejectWithValue }) => {
     try {
       const r = await api.login(input);
       return r.user;
     } catch (e: any) {
+      // 2FA akışı için hata kodunu olduğu gibi ilet (AuthPage yakalar)
+      if (e?.code === '2fa_required' || e?.code === 'invalid_2fa') {
+        return rejectWithValue(e.code);
+      }
       return rejectWithValue(e.message || 'Giriş başarısız');
     }
   },
@@ -82,7 +113,7 @@ export const createGuildThunk = createAsyncThunk(
 
 const guildsSlice = createSlice({
   name: 'guilds',
-  initialState: { list: [], selectedId: null, loading: false } as GuildsState,
+  initialState: { list: [], selectedId: NAV.guildId, loading: false } as GuildsState,
   reducers: {
     selectGuild(state, action: PayloadAction<string>) {
       state.selectedId = action.payload;
@@ -93,7 +124,9 @@ const guildsSlice = createSlice({
      .addCase(fetchGuilds.fulfilled, (s, a) => {
        s.loading = false;
        s.list = a.payload;
-       if (!s.selectedId && a.payload.length > 0) {
+       // Seçili yoksa ya da kayıtlı sunucu artık yoksa (silinmiş/çıkılmış) ilk sunucuya düş
+       const exists = s.selectedId && a.payload.some((g) => g.id === s.selectedId);
+       if (!exists && a.payload.length > 0) {
          s.selectedId = a.payload[0].id;
        }
      })
@@ -115,15 +148,17 @@ interface ChannelsState {
 
 export const fetchChannels = createAsyncThunk(
   'channels/list',
-  async (guildId: string) => {
+  async (guildId: string, { getState }) => {
     const list = await api.guilds.channels(guildId);
-    return { guildId, list };
+    // DM modundaysak ilk kanalı otomatik seçme (DM açık kalmalı)
+    const mode = (getState() as RootState).ui.mode;
+    return { guildId, list, mode };
   },
 );
 
 const channelsSlice = createSlice({
   name: 'channels',
-  initialState: { byGuild: {}, selectedId: null, lastByMode: { guild: {}, dm: null }, loading: false } as ChannelsState,
+  initialState: { byGuild: {}, selectedId: NAV.channelId, lastByMode: { guild: {}, dm: NAV.dmChannelId }, loading: false } as ChannelsState,
   reducers: {
     selectChannel(state, action: PayloadAction<string | null>) {
       state.selectedId = action.payload;
@@ -138,9 +173,12 @@ const channelsSlice = createSlice({
   extraReducers: (b) => {
     b.addCase(fetchChannels.fulfilled, (s, a) => {
       s.byGuild[a.payload.guildId] = a.payload.list;
-      const firstText = a.payload.list.find((c) => c.type !== 'voice');
-      if (firstText && (!s.selectedId || !a.payload.list.find((c) => c.id === s.selectedId))) {
-        s.selectedId = firstText.id;
+      // Otomatik ilk-kanal seçimi sadece guild modunda; DM modunda seçili DM korunur
+      if (a.payload.mode !== 'dm') {
+        const firstText = a.payload.list.find((c) => c.type !== 'voice');
+        if (firstText && (!s.selectedId || !a.payload.list.find((c) => c.id === s.selectedId))) {
+          s.selectedId = firstText.id;
+        }
       }
     });
   },
@@ -176,6 +214,12 @@ const messagesSlice = createSlice({
       if (list.some((m) => m.id === action.payload.id)) return;
       list.push(action.payload);
       state.byChannel[action.payload.channel_id] = list;
+    },
+    prependMessages(state, action: PayloadAction<{ channelId: string; list: APIMessage[] }>) {
+      const existing = state.byChannel[action.payload.channelId] ?? [];
+      const have = new Set(existing.map((m) => m.id));
+      const older = action.payload.list.filter((m) => !have.has(m.id));
+      state.byChannel[action.payload.channelId] = [...older, ...existing];
     },
     updateMessage(state, action: PayloadAction<APIMessage>) {
       const list = state.byChannel[action.payload.channel_id] ?? [];
@@ -309,6 +353,10 @@ export const acceptInviteThunk = createAsyncThunk(
 interface PresenceState {
   onlineByGuild: Record<string, string[]>;
   voiceByChannel: Record<string, string[]>;
+  // Rich presence: guild -> userId -> aktivite (Oynuyor/Dinliyor/...)
+  activityByGuild: Record<string, Record<string, { type: string; name: string; started_at?: number }>>;
+  // Canlı durum: guild -> userId -> online/idle/dnd (görünmezler presence'ta hiç yok)
+  statusByGuild: Record<string, Record<string, string>>;
 }
 
 export const fetchVoicePresence = createAsyncThunk(
@@ -316,20 +364,27 @@ export const fetchVoicePresence = createAsyncThunk(
   async (channelIds: string[]) => {
     if (channelIds.length === 0) return {};
     const params = new URLSearchParams({ channels: channelIds.join(',') });
-    const res = await fetch(`/voice-api/presence?${params}`);
+    const res = await fetch(httpUrl(`/voice-api/presence?${params}`));
     return (await res.json()) as Record<string, string[]>;
   },
 );
 
 const presenceSlice = createSlice({
   name: 'presence',
-  initialState: { onlineByGuild: {}, voiceByChannel: {} } as PresenceState,
+  initialState: { onlineByGuild: {}, voiceByChannel: {}, activityByGuild: {}, statusByGuild: {} } as PresenceState,
   reducers: {
     setGuildPresence(
       state,
-      action: PayloadAction<{ guildId: string; userIds: string[] }>,
+      action: PayloadAction<{
+        guildId: string;
+        userIds: string[];
+        activities?: Record<string, { type: string; name: string; started_at?: number }>;
+        statuses?: Record<string, string>;
+      }>,
     ) {
       state.onlineByGuild[action.payload.guildId] = action.payload.userIds;
+      state.activityByGuild[action.payload.guildId] = action.payload.activities ?? {};
+      state.statusByGuild[action.payload.guildId] = action.payload.statuses ?? {};
     },
   },
   extraReducers: (b) => {
@@ -432,6 +487,16 @@ export const ackChannel = createAsyncThunk(
   },
 );
 
+// Mesajı (ve sonrasını) okunmadı olarak işaretle: okundu state'ini bir önceki mesaja çeker
+export const markChannelUnread =
+  (channelId: string, beforeMessageId: string) =>
+  (dispatch: AppDispatch, getState: () => RootState) => {
+    const list = getState().messages.byChannel[channelId] ?? [];
+    const idx = list.findIndex((m) => m.id === beforeMessageId);
+    const prevId = idx > 0 ? list[idx - 1].id : '';
+    dispatch(ackChannel({ channelId, lastMessageId: prevId }));
+  };
+
 const readStatesSlice = createSlice({
   name: 'readStates',
   initialState: { byChannel: {} } as ReadStatesState,
@@ -470,7 +535,8 @@ const readStatesSlice = createSlice({
 // ===== UI =====
 interface UiState {
   showMemberList: boolean;
-  mode: 'guild' | 'dm';
+  mobileNav: boolean;
+  mode: 'guild' | 'dm' | 'discover';
   selectedDMChannelId: string | null;
   modal:
     | 'create_guild'
@@ -482,41 +548,66 @@ interface UiState {
     | 'create_channel'
     | 'edit_channel'
     | 'channel_perms'
+    | 'channel_settings'
     | 'user_settings'
+    | 'new_dm'
+    | 'follow_channel'
     | null;
   editingChannelId: string | null;
+  // Kanal oluştur penceresi açılırken ön-seçili tür (+ butonundan gelir)
+  createChannelType: 'text' | 'voice' | null;
   profileCardUserId: string | null;
   profileCardAnchor: { top: number; left: number; right: number; bottom: number; width: number; height: number } | null;
   // Mesajsız ama açık DM (profil kartından "Mesaj" ile gelinen): sidebar'da "Yeni" rozetli pinned satır
   pendingDM: { channelId: string; partnerId: string } | null;
   // Yanıtlanan mesaj ID (input'un üstünde "Yanıtlanan: @x" gösterimi)
   replyTo: string | null;
+  // Yoksayılan kullanıcı id'leri (mesajları gizlenir) — localStorage'da kalıcı
+  ignoredUsers: string[];
+}
+
+function loadIgnored(): string[] {
+  try {
+    const raw = localStorage.getItem('sidcord_ignored');
+    if (raw) return JSON.parse(raw);
+  } catch {
+    /* yoksay */
+  }
+  return [];
 }
 
 const uiSlice = createSlice({
   name: 'ui',
   initialState: {
-    showMemberList: true,
-    mode: 'guild',
-    selectedDMChannelId: null,
+    showMemberList: typeof window !== 'undefined' ? window.innerWidth >= 768 : true,
+    mobileNav: false,
+    mode: NAV.mode,
+    selectedDMChannelId: NAV.dmChannelId,
     modal: null,
     editingChannelId: null,
+    createChannelType: null,
     profileCardUserId: null,
     profileCardAnchor: null,
     pendingDM: null,
     replyTo: null,
+    ignoredUsers: loadIgnored(),
   } as UiState,
   reducers: {
     toggleMemberList(state) {
       state.showMemberList = !state.showMemberList;
     },
+    setMobileNav(state, action: PayloadAction<boolean>) {
+      state.mobileNav = action.payload;
+    },
     openModal(state, action: PayloadAction<UiState['modal']>) {
       state.modal = action.payload;
+      state.createChannelType = null;
     },
     closeModal(state) {
       state.modal = null;
+      state.createChannelType = null;
     },
-    setMode(state, action: PayloadAction<'guild' | 'dm'>) {
+    setMode(state, action: PayloadAction<'guild' | 'dm' | 'discover'>) {
       state.mode = action.payload;
     },
     selectDM(state, action: PayloadAction<string>) {
@@ -536,6 +627,25 @@ const uiSlice = createSlice({
     openChannelPerms(state, action: PayloadAction<string>) {
       state.modal = 'channel_perms';
       state.editingChannelId = action.payload;
+    },
+    openChannelSettings(state, action: PayloadAction<string>) {
+      state.modal = 'channel_settings';
+      state.editingChannelId = action.payload;
+    },
+    openCreateChannel(state, action: PayloadAction<'text' | 'voice' | null>) {
+      state.modal = 'create_channel';
+      state.createChannelType = action.payload;
+    },
+    toggleIgnore(state, action: PayloadAction<string>) {
+      const id = action.payload;
+      state.ignoredUsers = state.ignoredUsers.includes(id)
+        ? state.ignoredUsers.filter((x) => x !== id)
+        : [...state.ignoredUsers, id];
+      try {
+        localStorage.setItem('sidcord_ignored', JSON.stringify(state.ignoredUsers));
+      } catch {
+        /* yoksay */
+      }
     },
     setReplyTo(state, action: PayloadAction<string | null>) {
       state.replyTo = action.payload;
@@ -561,11 +671,20 @@ const uiSlice = createSlice({
 export const { logout } = authSlice.actions;
 export const { selectGuild } = guildsSlice.actions;
 export const { selectChannel, rememberGuildChannel, rememberDMChannel } = channelsSlice.actions;
-export const { pushMessage, updateMessage, removeMessage } = messagesSlice.actions;
+export const { pushMessage, updateMessage, removeMessage, prependMessages } = messagesSlice.actions;
+
+// Eski mesajları yükle (sonsuz kaydırma): en eski mesajdan öncesini getirip başa ekler
+export const loadOlderMessages =
+  (channelId: string, beforeId: string) =>
+  async (dispatch: AppDispatch) => {
+    const older = await api.channels.messages(channelId, beforeId, 50).catch(() => [] as APIMessage[]);
+    if (older.length) dispatch(prependMessages({ channelId, list: older.slice().reverse() }));
+    return older.length;
+  };
 export const { upsertUser } = usersSlice.actions;
 export const { setGuildPresence } = presenceSlice.actions;
 export const { setTyping, pruneTyping } = typingSlice.actions;
-export const { toggleMemberList, openModal, closeModal, setMode, selectDM, openProfileCard, setPendingDM, openEditChannel, openChannelPerms, setReplyTo } = uiSlice.actions;
+export const { toggleMemberList, setMobileNav, openModal, closeModal, setMode, selectDM, openProfileCard, setPendingDM, openEditChannel, openChannelPerms, openChannelSettings, openCreateChannel, toggleIgnore, setReplyTo } = uiSlice.actions;
 export const { bumpRead } = readStatesSlice.actions;
 export const { addToast, removeToast } = toastsSlice.actions;
 
@@ -580,9 +699,14 @@ export const switchToDM = () => (dispatch: AppDispatch, getState: () => RootStat
     dispatch(rememberGuildChannel({ guildId: prevGuildId, channelId: prevChannelId }));
   }
   dispatch(setMode('dm'));
-  const lastDM = s.channels.lastByMode.dm ?? s.ui.selectedDMChannelId ?? null;
-  dispatch(selectChannel(lastDM));
-  if (lastDM) dispatch(selectDM(lastDM));
+  // DM butonuna basınca son DM yerine Arkadaşlar ekranı açılsın (F5 davranışıyla aynı).
+  dispatch(selectChannel(null));
+};
+
+// Keşfet (Sunucular) görünümüne geç.
+export const switchToDiscover = () => (dispatch: AppDispatch) => {
+  dispatch(setMode('discover'));
+  dispatch(selectChannel(null));
 };
 
 export const switchToGuild = (guildId?: string) => (dispatch: AppDispatch, getState: () => RootState) => {
@@ -622,6 +746,27 @@ export const store = configureStore({
     guildRoles: guildRolesSlice.reducer,
     ui: uiSlice.reducer,
   },
+});
+
+// Navigasyon durumunu localStorage'a yaz (F5 sonrası kaldığın yerden devam).
+let lastNavJSON = '';
+store.subscribe(() => {
+  const s = store.getState();
+  const snap: NavSnapshot = {
+    mode: s.ui.mode,
+    guildId: s.guilds.selectedId,
+    channelId: s.channels.selectedId,
+    dmChannelId: s.ui.selectedDMChannelId,
+  };
+  const json = JSON.stringify(snap);
+  if (json !== lastNavJSON) {
+    lastNavJSON = json;
+    try {
+      localStorage.setItem('sidcord_nav', json);
+    } catch {
+      /* yoksay */
+    }
+  }
 });
 
 export type RootState = ReturnType<typeof store.getState>;

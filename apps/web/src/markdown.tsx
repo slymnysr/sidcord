@@ -18,6 +18,13 @@ type Node =
   | { kind: 'mention'; username: string }
   | { kind: 'user_mention'; userId: string }
   | { kind: 'channel_mention'; channelId: string }
+  | { kind: 'heading'; level: number; children: Node[] }
+  | { kind: 'emoji'; name: string }
+  | { kind: 'listitem'; ordered: boolean; num: number; indent: number; children: Node[] }
+  | { kind: 'role_mention'; roleId: string }
+  | { kind: 'timestamp'; unix: number; style: string }
+  | { kind: 'masklink'; text: string; href: string }
+  | { kind: 'subtext'; children: Node[] }
   | { kind: 'everyone' };
 
 // inline parser — recursive
@@ -26,10 +33,25 @@ function parseInline(src: string): Node[] {
   let i = 0;
   while (i < src.length) {
     // URL
+    // :emoji_adi: özel emoji
+    const emojiMatch = src.slice(i).match(/^:([a-z0-9_]{2,32}):/i);
+    if (emojiMatch) {
+      out.push({ kind: 'emoji', name: emojiMatch[1] });
+      i += emojiMatch[0].length;
+      continue;
+    }
+
     const urlMatch = src.slice(i).match(/^https?:\/\/[^\s]+/);
     if (urlMatch) {
       out.push({ kind: 'link', href: urlMatch[0] });
       i += urlMatch[0].length;
+      continue;
+    }
+    // Çıplak www. bağlantısı → https:// ekleyerek linkle
+    const wwwMatch = src.slice(i).match(/^www\.[^\s]+\.[^\s]+/);
+    if (wwwMatch && (i === 0 || /\s/.test(src[i - 1]))) {
+      out.push({ kind: 'masklink', text: wwwMatch[0], href: 'https://' + wwwMatch[0] });
+      i += wwwMatch[0].length;
       continue;
     }
     // Inline code
@@ -100,6 +122,27 @@ function parseInline(src: string): Node[] {
       i += channelMention[0].length;
       continue;
     }
+    // <@&id> rol mention
+    const roleMention = src.slice(i).match(/^<@&(\d{10,20})>/);
+    if (roleMention) {
+      out.push({ kind: 'role_mention', roleId: roleMention[1] });
+      i += roleMention[0].length;
+      continue;
+    }
+    // <t:unix(:stil)?> zaman damgası
+    const ts = src.slice(i).match(/^<t:(\d{1,15})(?::([tTdDfFR]))?>/);
+    if (ts) {
+      out.push({ kind: 'timestamp', unix: parseInt(ts[1], 10), style: ts[2] || 'f' });
+      i += ts[0].length;
+      continue;
+    }
+    // [metin](url) maskelenmiş bağlantı
+    const maskLink = src.slice(i).match(/^\[([^\]\n]{1,200})\]\((https?:\/\/[^\s)]+)\)/);
+    if (maskLink) {
+      out.push({ kind: 'masklink', text: maskLink[1], href: maskLink[2] });
+      i += maskLink[0].length;
+      continue;
+    }
     // @everyone / @here
     if (src.startsWith('@everyone', i) || src.startsWith('@here', i)) {
       out.push({ kind: 'everyone' });
@@ -124,7 +167,11 @@ function parseInline(src: string): Node[] {
       !src.startsWith('__', i) &&
       !src.startsWith('~~', i) &&
       src[i] !== '*' &&
+      src[i] !== '<' &&
+      src[i] !== '[' &&
       !/^https?:\/\//.test(src.slice(i)) &&
+      !((i === 0 || /\s/.test(src[i - 1])) && /^www\.[^\s]+\.[^\s]/i.test(src.slice(i))) &&
+      !/^:[a-z0-9_]{2,32}:/i.test(src.slice(i)) &&
       !/^@[a-z0-9_.]/i.test(src.slice(i))
     ) {
       txt += src[i];
@@ -160,7 +207,52 @@ function parseBlocks(src: string): Node[] {
       continue;
     }
 
-    // Blockquote
+    // Başlık (#, ##, ###)
+    const hMatch = ln.match(/^(#{1,3})\s+(.*)/);
+    if (hMatch) {
+      out.push({ kind: 'heading', level: hMatch[1].length, children: parseInline(hMatch[2]) });
+      i++;
+      continue;
+    }
+
+    // Alt metin (-# küçük gri yazı)
+    const subMatch = ln.match(/^-#\s+(.*)/);
+    if (subMatch) {
+      out.push({ kind: 'subtext', children: parseInline(subMatch[1]) });
+      i++;
+      continue;
+    }
+
+    // Liste öğesi (-, *, +, 1. veya 1)) — baştaki boşluklara göre iç içe
+    const ulMatch = ln.match(/^(\s*)[-*+]\s+(.*)/);
+    const olMatch = ln.match(/^(\s*)(\d+)[.)]\s+(.*)/);
+    if (ulMatch) {
+      const indent = Math.min(4, Math.floor(ulMatch[1].length / 2));
+      out.push({ kind: 'listitem', ordered: false, num: 0, indent, children: parseInline(ulMatch[2]) });
+      i++;
+      continue;
+    }
+    if (olMatch) {
+      const indent = Math.min(4, Math.floor(olMatch[1].length / 2));
+      out.push({ kind: 'listitem', ordered: true, num: parseInt(olMatch[2], 10), indent, children: parseInline(olMatch[3]) });
+      i++;
+      continue;
+    }
+
+    // Çok satırlı blockquote: >>> sonrası tüm satırlar alıntı olur
+    if (ln === '>>>' || ln.startsWith('>>> ')) {
+      const rest = ln === '>>>' ? '' : ln.slice(4);
+      const quoteLines = rest ? [rest] : [];
+      i++;
+      while (i < lines.length) {
+        quoteLines.push(lines[i]);
+        i++;
+      }
+      out.push({ kind: 'blockquote', children: parseBlocks(quoteLines.join('\n')) });
+      continue;
+    }
+
+    // Blockquote (tek satır >)
     if (ln.startsWith('> ')) {
       let quote = ln.slice(2);
       i++;
@@ -182,7 +274,7 @@ function parseBlocks(src: string): Node[] {
   return out;
 }
 
-function renderNode(n: Node, key: number, openMention?: (u: string) => void): React.ReactNode {
+function renderNode(n: Node, key: number, openMention?: (u: string) => void, jumbo?: boolean): React.ReactNode {
   switch (n.kind) {
     case 'text':
       return <React.Fragment key={key}>{n.value}</React.Fragment>;
@@ -201,17 +293,7 @@ function renderNode(n: Node, key: number, openMention?: (u: string) => void): Re
         </code>
       );
     case 'codeblock':
-      return (
-        <pre
-          key={key}
-          className="bg-surface-2 border border-line rounded-lg p-3 my-1 overflow-x-auto"
-        >
-          {n.lang && (
-            <div className="text-[10px] text-ink-tertiary uppercase mb-1">{n.lang}</div>
-          )}
-          <code className="text-[13px] font-mono text-ink-primary whitespace-pre">{n.value}</code>
-        </pre>
-      );
+      return <CodeBlock key={key} lang={n.lang} value={n.value} />;
     case 'blockquote':
       return (
         <blockquote key={key} className="border-l-4 border-line pl-3 my-1 text-ink-secondary">
@@ -220,6 +302,23 @@ function renderNode(n: Node, key: number, openMention?: (u: string) => void): Re
       );
     case 'spoiler':
       return <Spoiler key={key} nodes={n.children} openMention={openMention} />;
+    case 'heading': {
+      const cls = n.level === 1 ? 'text-xl font-bold' : n.level === 2 ? 'text-lg font-bold' : 'text-base font-semibold';
+      return (
+        <div key={key} className={cls + ' text-ink-primary my-1'}>
+          {n.children.map((c, i) => renderNode(c, i, openMention))}
+        </div>
+      );
+    }
+    case 'emoji':
+      return <CustomEmojiChip key={key} name={n.name} jumbo={jumbo} />;
+    case 'listitem':
+      return (
+        <div key={key} className="flex gap-2" style={{ marginLeft: 8 + n.indent * 18 }}>
+          <span className="text-ink-tertiary select-none">{n.ordered ? `${n.num}.` : n.indent > 0 ? '◦' : '•'}</span>
+          <span>{n.children.map((c, i) => renderNode(c, i, openMention))}</span>
+        </div>
+      );
     case 'link':
       return (
         <a
@@ -246,6 +345,29 @@ function renderNode(n: Node, key: number, openMention?: (u: string) => void): Re
       return <UserMentionChip key={key} userId={n.userId} />;
     case 'channel_mention':
       return <ChannelMentionChip key={key} channelId={n.channelId} />;
+    case 'role_mention':
+      return <RoleMentionChip key={key} roleId={n.roleId} />;
+    case 'timestamp':
+      return <TimestampChip key={key} unix={n.unix} style={n.style} />;
+    case 'masklink':
+      return (
+        <a
+          key={key}
+          href={n.href}
+          target="_blank"
+          rel="noreferrer"
+          title={n.href}
+          className="text-brand-500 hover:text-brand-400 hover:underline"
+        >
+          {n.text}
+        </a>
+      );
+    case 'subtext':
+      return (
+        <div key={key} className="text-xs text-ink-tertiary my-0.5">
+          {n.children.map((c, i) => renderNode(c, i, openMention))}
+        </div>
+      );
     case 'everyone':
       return (
         <span
@@ -283,6 +405,63 @@ function ChannelMentionChip({ channelId }: { channelId: string }) {
   );
 }
 
+function RoleMentionChip({ roleId }: { roleId: string }) {
+  const store = (window as any).__sidcord_store;
+  const state = store?.getState?.();
+  let role: any = null;
+  for (const gid in state?.guildRoles?.byGuild ?? {}) {
+    const found = state.guildRoles.byGuild[gid].find((r: any) => r.id === roleId);
+    if (found) { role = found; break; }
+  }
+  // renk: int veya #hex olabilir
+  let color = '';
+  const c = role?.color;
+  if (typeof c === 'number' && c > 0) color = '#' + c.toString(16).padStart(6, '0');
+  else if (typeof c === 'string' && c.startsWith('#')) color = c;
+  const style = color
+    ? { color, backgroundColor: color + '26' }
+    : undefined;
+  return (
+    <span
+      className={'font-semibold rounded px-1 py-0.5 ' + (color ? '' : 'bg-brand-500/15 text-brand-500')}
+      style={style}
+    >
+      @{role?.name ?? 'rol'}
+    </span>
+  );
+}
+
+function TimestampChip({ unix, style }: { unix: number; style: string }) {
+  const d = new Date(unix * 1000);
+  const now = Date.now();
+  let label = '';
+  if (style === 'R') {
+    // göreli
+    const diff = Math.round((unix * 1000 - now) / 1000);
+    const abs = Math.abs(diff);
+    const fmt = (v: number, unit: string) =>
+      diff < 0 ? `${v} ${unit} önce` : `${v} ${unit} sonra`;
+    if (abs < 60) label = fmt(abs, 'saniye');
+    else if (abs < 3600) label = fmt(Math.round(abs / 60), 'dakika');
+    else if (abs < 86400) label = fmt(Math.round(abs / 3600), 'saat');
+    else if (abs < 2592000) label = fmt(Math.round(abs / 86400), 'gün');
+    else if (abs < 31536000) label = fmt(Math.round(abs / 2592000), 'ay');
+    else label = fmt(Math.round(abs / 31536000), 'yıl');
+  } else if (style === 't') label = d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  else if (style === 'T') label = d.toLocaleTimeString('tr-TR');
+  else if (style === 'd') label = d.toLocaleDateString('tr-TR');
+  else if (style === 'D') label = d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
+  else if (style === 'F')
+    label = d.toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) +
+      ' ' + d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  else label = d.toLocaleDateString('tr-TR') + ' ' + d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  return (
+    <span className="bg-surface-2 rounded px-1 text-ink-secondary" title={d.toLocaleString('tr-TR')}>
+      {label}
+    </span>
+  );
+}
+
 function useUserCache(userId: string) {
   // Lazy: store'dan oku, yoksa fetch et
   const store = (window as any).__sidcord_store;
@@ -299,6 +478,38 @@ function useChannelCache(channelId: string) {
     if (found) return found;
   }
   return null;
+}
+
+function CustomEmojiChip({ name, jumbo }: { name: string; jumbo?: boolean }) {
+  const store = (window as any).__sidcord_store;
+  const gid = store?.getState?.()?.guilds?.selectedId;
+  const emojis = (window as any).__sidcord_emojis?.[gid] as { name: string; url: string }[] | undefined;
+  const found = emojis?.find((e) => e.name === name);
+  if (found) {
+    return <img src={found.url} alt={`:${name}:`} title={`:${name}:`} className={(jumbo ? 'w-12 h-12 ' : 'w-5 h-5 ') + 'inline-block object-contain align-text-bottom'} />;
+  }
+  return <>:{name}:</>;
+}
+
+function CodeBlock({ lang, value }: { lang: string; value: string }) {
+  const [copied, setCopied] = React.useState(false);
+  return (
+    <pre className="group/code relative bg-surface-2 border border-line rounded-lg p-3 my-1 overflow-x-auto">
+      <button
+        onClick={() => {
+          navigator.clipboard?.writeText(value).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1200);
+          });
+        }}
+        className="absolute top-1.5 right-1.5 opacity-0 group-hover/code:opacity-100 transition-opacity text-[10px] px-1.5 py-0.5 rounded bg-surface-3 hover:bg-surface-1 text-ink-secondary"
+      >
+        {copied ? 'Kopyalandı' : 'Kopyala'}
+      </button>
+      {lang && <div className="text-[10px] text-ink-tertiary uppercase mb-1">{lang}</div>}
+      <code className="text-[13px] font-mono text-ink-primary whitespace-pre">{value}</code>
+    </pre>
+  );
 }
 
 function Spoiler({
@@ -322,7 +533,29 @@ function Spoiler({
   );
 }
 
+// Mesaj yalnızca emoji (custom :name: veya unicode) içeriyorsa ve sayısı azsa
+// jumbo (büyük) render edilir — Discord davranışı.
+function isJumboEmoji(content: string): boolean {
+  const trimmed = content.trim();
+  if (!trimmed || trimmed.length > 60) return false;
+  // custom emoji token'larını çıkar
+  let stripped = trimmed.replace(/:([a-z0-9_]{2,32}):/gi, '');
+  let emojiCount = (trimmed.match(/:([a-z0-9_]{2,32}):/gi) ?? []).length;
+  try {
+    const unicodeEmoji = /[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}️‍]/gu;
+    emojiCount += (stripped.match(unicodeEmoji) ?? []).length;
+    stripped = stripped.replace(unicodeEmoji, '');
+  } catch {
+    return false; // ortam unicode property escape desteklemiyorsa atla
+  }
+  return emojiCount > 0 && emojiCount <= 27 && stripped.trim() === '';
+}
+
 export function Markdown({ content, onMention }: { content: string; onMention?: (u: string) => void }) {
   const nodes = parseBlocks(content);
+  const jumbo = isJumboEmoji(content);
+  if (jumbo) {
+    return <span className="text-4xl leading-tight inline-flex flex-wrap items-center gap-0.5">{nodes.map((n, i) => renderNode(n, i, onMention, true))}</span>;
+  }
   return <>{nodes.map((n, i) => renderNode(n, i, onMention))}</>;
 }
