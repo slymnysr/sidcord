@@ -13,9 +13,59 @@ import jwt from 'jsonwebtoken';
 import { v4 as uuid } from 'uuid';
 import pino from 'pino';
 import { config } from './config.js';
-import { getRoom, listPeerIds } from './room.js';
+import { getRoom, listPeerIds, getVoiceState, setVoiceState, applyVoiceStateToPeer } from './room.js';
 
 const log = pino({ name: 'voice/signaling', level: 'info' });
+
+// API'den kalıcı server-mute/deaf durumunu çekmek için (voice server restart durabilitesi)
+const API_INTERNAL_URL = process.env.API_INTERNAL_URL ?? 'http://localhost:8080/api/v1';
+const VOICE_CONTROL_SECRET = process.env.VOICE_CONTROL_SECRET ?? 'dev_voice_control_secret_change_me';
+
+// Kanal join politikası: kullanıcı limiti + ses bitrate'i + limit muafiyeti (API'den)
+async function fetchJoinPolicy(
+  channelId: string,
+  userId: string,
+): Promise<{ user_limit: number; bitrate: number; can_bypass: boolean } | null> {
+  try {
+    const res = await fetch(
+      `${API_INTERNAL_URL}/voice-internal/can-join?channel_id=${encodeURIComponent(channelId)}&user_id=${encodeURIComponent(userId)}`,
+      { headers: { 'x-voice-secret': VOICE_CONTROL_SECRET } },
+    );
+    if (!res.ok) return null;
+    return (await res.json()) as { user_limit: number; bitrate: number; can_bypass: boolean };
+  } catch {
+    return null; // API erişilemezse limit uygulanmaz (kullanılabilirlik > kısıt)
+  }
+}
+
+async function loadPersistedVoiceState(channelId: string, userId: string): Promise<void> {
+  try {
+    const res = await fetch(
+      `${API_INTERNAL_URL}/voice-internal/state?channel_id=${encodeURIComponent(channelId)}&user_id=${encodeURIComponent(userId)}`,
+      { headers: { 'x-voice-secret': VOICE_CONTROL_SECRET } },
+    );
+    if (!res.ok) return;
+    const st = (await res.json()) as { mute?: boolean; deafen?: boolean };
+    if (st.mute || st.deafen) {
+      setVoiceState(userId, { mute: !!st.mute, deafen: !!st.deafen });
+      applyVoiceStateToPeer(userId);
+    }
+  } catch {
+    /* API erişilemezse sessizce geç — enforcement gateway/DB üzerinden zaten korunuyor */
+  }
+}
+
+// Kontrol endpoint'inin (presence_http) odaya yayın yapabilmesi için wss referansı
+let wssRef: WebSocketServer | null = null;
+export function broadcastToChannel(channelId: string, m: { type: string; payload?: any }) {
+  if (!wssRef) return;
+  for (const client of wssRef.clients) {
+    const c = client as AuthedSocket;
+    if (c.readyState === WebSocket.OPEN && c.channelId === channelId) {
+      try { c.send(JSON.stringify(m)); } catch { /* yoksay */ }
+    }
+  }
+}
 
 interface Message {
   id?: string;
@@ -28,6 +78,7 @@ type AuthedSocket = WebSocket & { userId?: string; channelId?: string; socketId?
 
 export function startSignaling() {
   const wss = new WebSocketServer({ port: config.port });
+  wssRef = wss;
   log.info({ port: config.port }, 'voice signaling listening');
 
   wss.on('connection', (ws: AuthedSocket, req) => {
@@ -100,7 +151,25 @@ async function handleMessage(ws: AuthedSocket, wss: WebSocketServer, msg: Messag
     }
 
     case 'join': {
+      // Kanal kullanıcı limiti (taşıma/kanal yönetme yetkisi olanlar dolu kanala girebilir)
+      const policy = await fetchJoinPolicy(ws.channelId, ws.userId);
+      if (policy && policy.user_limit > 0 && !policy.can_bypass) {
+        const current = listPeerIds(ws.channelId).filter((id) => id !== ws.userId).length;
+        if (current >= policy.user_limit) {
+          send(ws, {
+            type: 'error',
+            replyTo: msg.id,
+            payload: {
+              code: 'channel_full',
+              message: `Kanal dolu (${policy.user_limit} kişi sınırı)`,
+            },
+          });
+          return;
+        }
+      }
       await room.addPeer(ws.userId, ws.socketId!);
+      // Kalıcı server-mute/deaf durumunu API'den yükle (voice server yeniden başlamış olabilir)
+      await loadPersistedVoiceState(ws.channelId, ws.userId);
       const peerIds = listPeerIds(ws.channelId).filter((id) => id !== ws.userId);
       const existing = room.otherProducers(ws.userId).map((x) => ({
         producerId: x.producer.id,
@@ -111,7 +180,14 @@ async function handleMessage(ws: AuthedSocket, wss: WebSocketServer, msg: Messag
       send(ws, {
         type: 'joined',
         replyTo: msg.id,
-        payload: { peers: peerIds, producers: existing },
+        payload: {
+          peers: peerIds,
+          producers: existing,
+          stageSpeakers: Array.from(room.stageSpeakers),
+          stageHands: Array.from(room.stageHands),
+          // Kanalın ses bitrate ayarı (bps) — client opus encoder'ına uygular
+          audioBitrate: policy?.bitrate ?? 64000,
+        },
       });
       return;
     }
@@ -158,6 +234,10 @@ async function handleMessage(ws: AuthedSocket, wss: WebSocketServer, msg: Messag
       const { kind, rtpParameters, appData } = msg.payload;
       const producer = await peer.sendTransport.produce({ kind, rtpParameters, appData });
       peer.producers.set(producer.id, producer);
+      // Sunucuda susturulmuşsa mikrofon producer'ını anında duraklat (yeniden bağlanışta da geçerli)
+      if ((appData?.source === 'mic' || kind === 'audio') && getVoiceState(ws.userId).mute) {
+        producer.pause().catch(() => {});
+      }
       send(ws, { type: 'produced', replyTo: msg.id, payload: { id: producer.id } });
       broadcast(wss, ws.channelId, ws.userId, {
         type: 'newProducer',
@@ -181,6 +261,10 @@ async function handleMessage(ws: AuthedSocket, wss: WebSocketServer, msg: Messag
         paused: false,
       });
       peer.consumers.set(consumer.id, consumer);
+      // Sunucuda sağırlaştırılmışsa ses tüketicilerini duraklat (kimseyi duyamaz)
+      if (consumer.kind === 'audio' && getVoiceState(ws.userId).deafen) {
+        consumer.pause().catch(() => {});
+      }
       send(ws, {
         type: 'consumed',
         replyTo: msg.id,
@@ -191,6 +275,42 @@ async function handleMessage(ws: AuthedSocket, wss: WebSocketServer, msg: Messag
           rtpParameters: consumer.rtpParameters,
         },
       });
+      return;
+    }
+
+    case 'closeProducer': {
+      // Kullanıcı kamera/ekran yayınını kapattı → producer'ı kapat + odadakilere bildir
+      const peer = room.peers.get(ws.userId);
+      const pid = msg.payload?.producerId;
+      if (peer && pid) {
+        peer.producers.get(pid)?.close();
+        peer.producers.delete(pid);
+        broadcast(wss, ws.channelId, ws.userId, {
+          type: 'producerClosed',
+          payload: { producerId: pid, userId: ws.userId },
+        });
+      }
+      return;
+    }
+
+    case 'stageHand': {
+      // Dinleyici konuşma istedi (el kaldır/indir) → odaya yay
+      const raised = !!msg.payload?.raised;
+      if (raised) room.stageHands.add(ws.userId);
+      else room.stageHands.delete(ws.userId);
+      broadcast(wss, ws.channelId, '', { type: 'stageHand', payload: { userId: ws.userId, raised } });
+      return;
+    }
+
+    case 'stageSpeaker': {
+      // Moderatör birini konuşmacı yaptı/dinleyiciye aldı → odaya yay
+      // (yetki kontrolü istemci UI'da; voice server rol bilmez)
+      const targetId = String(msg.payload?.userId ?? '');
+      const isSpeaker = !!msg.payload?.isSpeaker;
+      if (!targetId) return;
+      if (isSpeaker) { room.stageSpeakers.add(targetId); room.stageHands.delete(targetId); }
+      else room.stageSpeakers.delete(targetId);
+      broadcast(wss, ws.channelId, '', { type: 'stageSpeaker', payload: { userId: targetId, isSpeaker } });
       return;
     }
 

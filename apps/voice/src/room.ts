@@ -18,6 +18,9 @@ export interface Peer {
 export class Room {
   channelId: string;
   peers = new Map<string, Peer>();
+  // Sahne (stage) durumu
+  stageSpeakers = new Set<string>(); // konuşmacı userId'leri
+  stageHands = new Set<string>();    // el kaldıranlar
 
   constructor(channelId: string) {
     this.channelId = channelId;
@@ -86,4 +89,45 @@ export function getRoom(channelId: string): Room {
 
 export function listPeerIds(channelId: string): string[] {
   return Array.from(rooms.get(channelId)?.peers.keys() ?? []);
+}
+
+// === Sunucu susturma / sağırlaştırma (mod yetkisi, enforced) ===
+// Discord: bir mod birini sunucuda susturursa, o kişinin mikrofonu SUNUCU SEVİYESİNDE
+// duraklatılır (producer.pause) — kimse duyamaz, istemci atlayamaz. Sağırlaştırma ise
+// o kişinin TÜM ses tüketicilerini duraklatır (consumer.pause).
+const voiceStates = new Map<string, { mute: boolean; deafen: boolean }>(); // userId -> state
+
+export function getVoiceState(userId: string): { mute: boolean; deafen: boolean } {
+  return voiceStates.get(userId) ?? { mute: false, deafen: false };
+}
+
+export function findUserRoom(userId: string): Room | undefined {
+  for (const r of rooms.values()) if (r.peers.has(userId)) return r;
+  return undefined;
+}
+
+// Bağlı bir peer'e güncel mute/deafen durumunu uygula
+export function applyVoiceStateToPeer(userId: string): void {
+  const st = getVoiceState(userId);
+  const peer = findUserRoom(userId)?.peers.get(userId);
+  if (!peer) return;
+  for (const p of peer.producers.values()) {
+    if ((p.appData as any)?.source === 'mic') {
+      (st.mute ? p.pause() : p.resume()).catch(() => {});
+    }
+  }
+  for (const c of peer.consumers.values()) {
+    if (c.kind === 'audio') {
+      (st.deafen ? c.pause() : c.resume()).catch(() => {});
+    }
+  }
+}
+
+// Mod komutu: durumu kaydet + bağlıysa anında uygula
+export function setVoiceState(userId: string, partial: { mute?: boolean; deafen?: boolean }): { mute: boolean; deafen: boolean } {
+  const cur = getVoiceState(userId);
+  const next = { mute: partial.mute ?? cur.mute, deafen: partial.deafen ?? cur.deafen };
+  voiceStates.set(userId, next);
+  applyVoiceStateToPeer(userId);
+  return next;
 }

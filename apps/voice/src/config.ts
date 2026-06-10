@@ -40,7 +40,9 @@ export const config = {
           'level-asymmetry-allowed': 1,
         },
       },
-    ] satisfies msTypes.RtpCodecCapability[],
+      // Tip notu: RtpCodecCapability.preferredPayloadType tipte zorunlu görünse de
+      // RouterOptions.mediaCodecs içinde resmî olarak opsiyoneldir (mediasoup d.ts yorumu) → cast.
+    ] as msTypes.RtpCodecCapability[],
   },
 
   // WebRtcTransport listenIps
