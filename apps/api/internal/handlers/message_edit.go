@@ -43,6 +43,12 @@ func (h *Handler) EditMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_content", "1-4000 karakter")
 		return
 	}
+	// İçerik gerçekten değiştiyse eski sürümü geçmişe kaydet
+	if m.Content != req.Content {
+		_, _ = h.Pool.Exec(r.Context(),
+			`INSERT INTO message_edits (id, message_id, old_content) VALUES ($1, $2, $3)`,
+			h.IDs.Next(), messageID, m.Content)
+	}
 	if err := h.Messages.UpdateContent(r.Context(), messageID, uid, req.Content); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "güncellenmedi")
 		return
@@ -56,6 +62,56 @@ func (h *Handler) EditMessage(w http.ResponseWriter, r *http.Request) {
 		h.publishMessageEvent(r.Context(), ch, m, "MESSAGE_UPDATE")
 	}
 	writeJSON(w, http.StatusOK, m)
+}
+
+// GET /api/v1/messages/{messageID}/edits — mesajın düzenleme geçmişi (eski sürümler, yeni→eski).
+func (h *Handler) GetMessageEdits(w http.ResponseWriter, r *http.Request) {
+	messageID, err := parseID(r, "messageID")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "id parse")
+		return
+	}
+	uid := middleware.UserIDFrom(r.Context())
+	m, err := h.Messages.ByID(r.Context(), messageID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "mesaj yok")
+		return
+	}
+	// Kanalı görebiliyor mu? (guild üyeliği / DM katılımı)
+	ch, err := h.Channels.ByID(r.Context(), m.ChannelID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "kanal yok")
+		return
+	}
+	if ch.GuildID != nil {
+		if ok, _ := h.Guilds.IsMember(r.Context(), *ch.GuildID, uid); !ok {
+			writeError(w, http.StatusForbidden, "forbidden", "üye değilsin")
+			return
+		}
+	} else if ok, _ := h.DMs.IsParticipant(r.Context(), ch.ID, uid); !ok {
+		writeError(w, http.StatusForbidden, "forbidden", "katılımcı değilsin")
+		return
+	}
+	rows, err := h.Pool.Query(r.Context(),
+		`SELECT id::text, old_content, edited_at FROM message_edits WHERE message_id = $1 ORDER BY edited_at DESC`, messageID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "alınamadı")
+		return
+	}
+	defer rows.Close()
+	type editView struct {
+		ID         string    `json:"id"`
+		OldContent string    `json:"old_content"`
+		EditedAt   time.Time `json:"edited_at"`
+	}
+	out := []editView{}
+	for rows.Next() {
+		var e editView
+		if err := rows.Scan(&e.ID, &e.OldContent, &e.EditedAt); err == nil {
+			out = append(out, e)
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (h *Handler) DeleteMessage(w http.ResponseWriter, r *http.Request) {

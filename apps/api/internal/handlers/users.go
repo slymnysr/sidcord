@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"time"
@@ -13,6 +14,8 @@ type updateStatusReq struct {
 	Status            string  `json:"status,omitempty"`
 	CustomStatusText  *string `json:"custom_status_text,omitempty"`
 	CustomStatusEmoji *string `json:"custom_status_emoji,omitempty"`
+	// Özel durumun kaç saniye sonra otomatik temizleneceği. 0/null = süresiz.
+	ClearAfterSeconds *int `json:"clear_after_seconds,omitempty"`
 }
 
 func (h *Handler) UpdateMyStatus(w http.ResponseWriter, r *http.Request) {
@@ -40,7 +43,62 @@ func (h *Handler) UpdateMyStatus(w http.ResponseWriter, r *http.Request) {
 	if req.CustomStatusEmoji != nil {
 		_, _ = h.Pool.Exec(r.Context(), `UPDATE users SET custom_status_emoji = $1 WHERE id = $2`, *req.CustomStatusEmoji, uid)
 	}
+	// Özel durum süresi: pozitifse şimdi + saniye, aksi halde temizle (süresiz)
+	if req.ClearAfterSeconds != nil {
+		if *req.ClearAfterSeconds > 0 {
+			expiry := time.Now().Add(time.Duration(*req.ClearAfterSeconds) * time.Second)
+			_, _ = h.Pool.Exec(r.Context(), `UPDATE users SET custom_status_expires_at = $1 WHERE id = $2`, expiry, uid)
+		} else {
+			_, _ = h.Pool.Exec(r.Context(), `UPDATE users SET custom_status_expires_at = NULL WHERE id = $1`, uid)
+		}
+	}
+	// Durum metni boşaltıldıysa süreyi de temizle
+	if req.CustomStatusText != nil && *req.CustomStatusText == "" {
+		_, _ = h.Pool.Exec(r.Context(), `UPDATE users SET custom_status_expires_at = NULL WHERE id = $1`, uid)
+	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type privacyView struct {
+	AllowDMsFrom string `json:"allow_dms_from"`
+}
+
+// GET /api/v1/users/me/privacy
+func (h *Handler) GetMyPrivacy(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserIDFrom(r.Context())
+	var v privacyView
+	if err := h.Pool.QueryRow(r.Context(), `SELECT allow_dms_from FROM users WHERE id = $1`, uid).Scan(&v.AllowDMsFrom); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "alınamadı")
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+// PUT /api/v1/users/me/privacy
+func (h *Handler) UpdateMyPrivacy(w http.ResponseWriter, r *http.Request) {
+	var req privacyView
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if req.AllowDMsFrom != "everyone" && req.AllowDMsFrom != "friends" {
+		writeError(w, http.StatusBadRequest, "invalid", "everyone | friends")
+		return
+	}
+	uid := middleware.UserIDFrom(r.Context())
+	if _, err := h.Pool.Exec(r.Context(), `UPDATE users SET allow_dms_from = $1 WHERE id = $2`, req.AllowDMsFrom, uid); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "kaydedilemedi")
+		return
+	}
+	writeJSON(w, http.StatusOK, req)
+}
+
+// ClearExpiredCustomStatuses — süresi dolan özel durumları temizler (ticker'dan çağrılır).
+func (h *Handler) ClearExpiredCustomStatuses(ctx context.Context) {
+	_, _ = h.Pool.Exec(ctx, `
+		UPDATE users
+		SET custom_status_text = NULL, custom_status_emoji = NULL, custom_status_expires_at = NULL
+		WHERE custom_status_expires_at IS NOT NULL AND custom_status_expires_at <= now()`)
 }
 
 // Genel kullanıcı profili — username, display_name, avatar_color/url, bio, status, bot, created_at
@@ -65,6 +123,13 @@ type publicUserView struct {
 	AvatarURL   *string   `json:"avatar_url,omitempty"`
 	BannerURL   *string   `json:"banner_url,omitempty"`
 	Bio         *string   `json:"bio,omitempty"`
+	Pronouns    *string   `json:"pronouns,omitempty"`
+	AccentColor *string   `json:"accent_color,omitempty"`
+	CustomStatusText  *string `json:"custom_status_text,omitempty"`
+	CustomStatusEmoji *string `json:"custom_status_emoji,omitempty"`
+	EmailVerified bool      `json:"email_verified"`
+	TOTPEnabled   bool      `json:"totp_enabled"`
+	AvatarDecoration *string `json:"avatar_decoration,omitempty"`
 	Status      string    `json:"status"`
 	Bot         bool      `json:"bot"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -74,6 +139,7 @@ type publicUserView struct {
 	DMChannelID   *string            `json:"dm_channel_id,omitempty"`
 	MutualGuilds  []mutualGuildView  `json:"mutual_guilds,omitempty"`
 	MutualFriends []mutualFriendView `json:"mutual_friends,omitempty"`
+	Connections   []connectionView   `json:"connections,omitempty"`
 }
 
 func (h *Handler) GetUserPublic(w http.ResponseWriter, r *http.Request) {
@@ -88,10 +154,10 @@ func (h *Handler) GetUserPublic(w http.ResponseWriter, r *http.Request) {
 	var v publicUserView
 	err = h.Pool.QueryRow(r.Context(), `
         SELECT id::text, username, display_name, avatar_color, avatar_url,
-               banner_url, bio, status, bot, created_at
+               banner_url, bio, pronouns, accent_color, custom_status_text, custom_status_emoji, email_verified, totp_enabled, avatar_decoration, status, bot, created_at
         FROM users WHERE id = $1
     `, id).Scan(&v.ID, &v.Username, &v.DisplayName, &v.AvatarColor, &v.AvatarURL,
-		&v.BannerURL, &v.Bio, &v.Status, &v.Bot, &v.CreatedAt)
+		&v.BannerURL, &v.Bio, &v.Pronouns, &v.AccentColor, &v.CustomStatusText, &v.CustomStatusEmoji, &v.EmailVerified, &v.TOTPEnabled, &v.AvatarDecoration, &v.Status, &v.Bot, &v.CreatedAt)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "not_found", "kullanıcı yok")
 		return
@@ -184,6 +250,20 @@ func (h *Handler) GetUserPublic(w http.ResponseWriter, r *http.Request) {
 				if err := rows.Scan(&mf.UserID, &mf.DisplayName, &mf.AvatarColor); err == nil {
 					v.MutualFriends = append(v.MutualFriends, mf)
 				}
+			}
+		}
+	}
+
+	// Görünür hesap bağlantıları (profilde çipler)
+	if crows, err := h.Pool.Query(r.Context(), `
+        SELECT id::text, type, name, verified, visible
+        FROM user_connections WHERE user_id = $1 AND visible ORDER BY created_at ASC
+    `, id); err == nil {
+		defer crows.Close()
+		for crows.Next() {
+			var c connectionView
+			if crows.Scan(&c.ID, &c.Type, &c.Name, &c.Verified, &c.Visible) == nil {
+				v.Connections = append(v.Connections, c)
 			}
 		}
 	}

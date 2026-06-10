@@ -15,6 +15,8 @@ import (
 
 type banReq struct {
 	Reason string `json:"reason,omitempty"`
+	// Banlanan üyenin son X saatlik mesajlarını sil (0 = silme; en fazla 168 = 7 gün)
+	DeleteMessageHours int32 `json:"delete_message_hours,omitempty"`
 }
 
 func (h *Handler) BanMember(w http.ResponseWriter, r *http.Request) {
@@ -37,6 +39,11 @@ func (h *Handler) BanMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "cannot_ban_owner", "sunucu sahibi banlanamaz")
 		return
 	}
+	// Hiyerarşi: kendinden yüksek veya eşit rollü birini banlayamazsın (owner hariç).
+	if !h.canModerateTarget(r.Context(), guildID, requester, userID) {
+		writeError(w, http.StatusForbidden, "role_hierarchy", "bu üyeyi banlayamazsın (rol hiyerarşisi)")
+		return
+	}
 
 	var req banReq
 	_ = readJSON(r, &req)
@@ -56,11 +63,30 @@ func (h *Handler) BanMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.Events.ToGuild(r.Context(), guildID, "GUILD_MEMBER_REMOVE", map[string]any{"user_id": userID, "reason": "banned"})
+	// Son X saatlik mesajları sil (Discord ban seçeneği)
+	deletedCount := int64(0)
+	if req.DeleteMessageHours > 0 {
+		hours := req.DeleteMessageHours
+		if hours > 168 {
+			hours = 168
+		}
+		if tag, err := h.Pool.Exec(r.Context(), `
+            DELETE FROM messages
+            WHERE author_id = $1
+              AND channel_id IN (SELECT id FROM channels WHERE guild_id = $2)
+              AND created_at > NOW() - make_interval(hours => $3)
+        `, userID, guildID, int(hours)); err == nil {
+			deletedCount = tag.RowsAffected()
+		} else {
+			h.logger.Warn("ban mesaj silme", zap.Error(err))
+		}
+	}
 	auditReason := ""
 	if reason != nil {
 		auditReason = *reason
 	}
-	h.logAudit(r.Context(), guildID, requester, &userID, "member_ban", auditReason, nil)
+	h.logAudit(r.Context(), guildID, requester, &userID, "member_ban", auditReason,
+		map[string]any{"deleted_messages": deletedCount, "delete_message_hours": req.DeleteMessageHours})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -132,6 +158,10 @@ func (h *Handler) KickMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "cannot_kick_owner", "sunucu sahibi atılamaz")
 		return
 	}
+	if !h.canModerateTarget(r.Context(), guildID, requester, userID) {
+		writeError(w, http.StatusForbidden, "role_hierarchy", "bu üyeyi atamazsın (rol hiyerarşisi)")
+		return
+	}
 	if err := h.Moderation.Kick(r.Context(), guildID, userID); err != nil {
 		if errors.Is(err, repo.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "üye yok")
@@ -162,6 +192,10 @@ func (h *Handler) TimeoutMember(w http.ResponseWriter, r *http.Request) {
 	}
 	requester := middleware.UserIDFrom(r.Context())
 	if !h.requirePerm(r, guildID, requester, perms.ModerateMembers, w) {
+		return
+	}
+	if !h.canModerateTarget(r.Context(), guildID, requester, userID) {
+		writeError(w, http.StatusForbidden, "role_hierarchy", "bu üyeye zaman aşımı uygulayamazsın (rol hiyerarşisi)")
 		return
 	}
 	var req timeoutReq

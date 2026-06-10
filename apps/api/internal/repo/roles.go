@@ -18,6 +18,7 @@ type Role struct {
 	Permissions int64     `json:"permissions,string"`
 	Hoist       bool      `json:"hoist"`
 	Mentionable bool      `json:"mentionable"`
+	Icon        *string   `json:"icon,omitempty"`
 	IsEveryone  bool      `json:"is_everyone"`
 	CreatedAt   time.Time `json:"created_at"`
 }
@@ -28,19 +29,19 @@ func NewRoles(p *pgxpool.Pool) *Roles { return &Roles{pool: p} }
 
 func (r *Roles) Create(ctx context.Context, role *Role) error {
 	_, err := r.pool.Exec(ctx, `
-        INSERT INTO roles (id, guild_id, name, color, position, permissions, hoist, mentionable, is_everyone)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        INSERT INTO roles (id, guild_id, name, color, position, permissions, hoist, mentionable, icon, is_everyone)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
     `, role.ID, role.GuildID, role.Name, role.Color, role.Position, role.Permissions,
-		role.Hoist, role.Mentionable, role.IsEveryone)
+		role.Hoist, role.Mentionable, role.Icon, role.IsEveryone)
 	return err
 }
 
 func (r *Roles) Update(ctx context.Context, role *Role) error {
 	_, err := r.pool.Exec(ctx, `
         UPDATE roles SET name = $2, color = $3, position = $4,
-                         permissions = $5, hoist = $6, mentionable = $7
+                         permissions = $5, hoist = $6, mentionable = $7, icon = $8
         WHERE id = $1
-    `, role.ID, role.Name, role.Color, role.Position, role.Permissions, role.Hoist, role.Mentionable)
+    `, role.ID, role.Name, role.Color, role.Position, role.Permissions, role.Hoist, role.Mentionable, role.Icon)
 	return err
 }
 
@@ -52,10 +53,10 @@ func (r *Roles) Delete(ctx context.Context, id int64) error {
 func (r *Roles) ByID(ctx context.Context, id int64) (*Role, error) {
 	role := &Role{}
 	err := r.pool.QueryRow(ctx, `
-        SELECT id, guild_id, name, color, position, permissions, hoist, mentionable, is_everyone, created_at
+        SELECT id, guild_id, name, color, position, permissions, hoist, mentionable, icon, is_everyone, created_at
         FROM roles WHERE id = $1
     `, id).Scan(&role.ID, &role.GuildID, &role.Name, &role.Color, &role.Position, &role.Permissions,
-		&role.Hoist, &role.Mentionable, &role.IsEveryone, &role.CreatedAt)
+		&role.Hoist, &role.Mentionable, &role.Icon, &role.IsEveryone, &role.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -64,7 +65,7 @@ func (r *Roles) ByID(ctx context.Context, id int64) (*Role, error) {
 
 func (r *Roles) ForGuild(ctx context.Context, guildID int64) ([]Role, error) {
 	rows, err := r.pool.Query(ctx, `
-        SELECT id, guild_id, name, color, position, permissions, hoist, mentionable, is_everyone, created_at
+        SELECT id, guild_id, name, color, position, permissions, hoist, mentionable, icon, is_everyone, created_at
         FROM roles WHERE guild_id = $1
         ORDER BY position DESC, id ASC
     `, guildID)
@@ -76,7 +77,7 @@ func (r *Roles) ForGuild(ctx context.Context, guildID int64) ([]Role, error) {
 	for rows.Next() {
 		var role Role
 		if err := rows.Scan(&role.ID, &role.GuildID, &role.Name, &role.Color, &role.Position,
-			&role.Permissions, &role.Hoist, &role.Mentionable, &role.IsEveryone, &role.CreatedAt); err != nil {
+			&role.Permissions, &role.Hoist, &role.Mentionable, &role.Icon, &role.IsEveryone, &role.CreatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, role)

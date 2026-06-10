@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS thread_tags;
+DROP TABLE IF EXISTS forum_tags;

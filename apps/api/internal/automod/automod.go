@@ -72,7 +72,7 @@ func New(pool *pgxpool.Pool) *Engine {
 
 // Inspect — mesajı kurallara karşı denetle.
 // guildID nil ise (DM) automod skip eder.
-func (e *Engine) Inspect(ctx context.Context, guildID int64, channelID int64, userMemberRoles []int64, content string) *Decision {
+func (e *Engine) Inspect(ctx context.Context, guildID int64, channelID int64, userID int64, userMemberRoles []int64, content string) *Decision {
 	rows, err := e.pool.Query(ctx, `
         SELECT id, name, trigger_type::text, trigger_data, actions, exempt_role_ids, exempt_channel_ids
         FROM automod_rules
@@ -100,7 +100,13 @@ func (e *Engine) Inspect(ctx context.Context, guildID int64, channelID int64, us
 			continue
 		}
 
-		match := check(r.TriggerType, r.TriggerData, content)
+		// message_spam state gerektirir (son mesajlar) → ayrı kontrol
+		var match string
+		if r.TriggerType == TriggerMessageSpam {
+			match = e.checkMessageSpam(ctx, channelID, userID, content, r.TriggerData)
+		} else {
+			match = check(r.TriggerType, r.TriggerData, content)
+		}
 		if match == "" {
 			continue
 		}
@@ -116,6 +122,45 @@ func (e *Engine) Inspect(ctx context.Context, guildID int64, channelID int64, us
 		}
 	}
 	return nil
+}
+
+// checkMessageSpam — kullanıcının son mesajlarına bakar: kısa sürede çok mesaj veya tekrarlı içerik.
+// Config: { max_messages, interval_sec, max_duplicates }. Varsayılan: 5 mesaj / 7 sn, 3 tekrar.
+func (e *Engine) checkMessageSpam(ctx context.Context, channelID, userID int64, content string, data json.RawMessage) string {
+	var d struct {
+		MaxMessages   int `json:"max_messages"`
+		IntervalSec   int `json:"interval_sec"`
+		MaxDuplicates int `json:"max_duplicates"`
+	}
+	_ = json.Unmarshal(data, &d)
+	if d.MaxMessages == 0 {
+		d.MaxMessages = 5
+	}
+	if d.IntervalSec == 0 {
+		d.IntervalSec = 7
+	}
+	if d.MaxDuplicates == 0 {
+		d.MaxDuplicates = 3
+	}
+	// Son interval içinde bu kullanıcının kaç mesajı var (bu mesaj henüz eklenmedi → +1)
+	var recentCount int
+	_ = e.pool.QueryRow(ctx, `
+		SELECT count(*) FROM messages
+		WHERE channel_id = $1 AND author_id = $2 AND created_at > now() - make_interval(secs => $3)
+	`, channelID, userID, d.IntervalSec).Scan(&recentCount)
+	if recentCount+1 > d.MaxMessages {
+		return "message-spam-rate"
+	}
+	// Aynı içeriğin tekrarı (son 60 sn)
+	var dupCount int
+	_ = e.pool.QueryRow(ctx, `
+		SELECT count(*) FROM messages
+		WHERE channel_id = $1 AND author_id = $2 AND content = $3 AND created_at > now() - interval '60 seconds'
+	`, channelID, userID, content).Scan(&dupCount)
+	if dupCount+1 > d.MaxDuplicates {
+		return "message-spam-duplicate"
+	}
+	return ""
 }
 
 func check(tt TriggerType, data json.RawMessage, content string) string {

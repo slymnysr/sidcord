@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -10,20 +11,28 @@ import (
 	"github.com/sidcord/api/internal/repo"
 )
 
+type commandOption struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Required    bool   `json:"required"`
+}
+
 type commandView struct {
-	ID          string    `json:"id"`
-	GuildID     string    `json:"guild_id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Response    string    `json:"response"`
-	CreatorID   string    `json:"creator_id"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID          string          `json:"id"`
+	GuildID     string          `json:"guild_id"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Response    string          `json:"response"`
+	Options     []commandOption `json:"options"`
+	CreatorID   string          `json:"creator_id"`
+	CreatedAt   time.Time       `json:"created_at"`
 }
 
 type createCommandReq struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Response    string `json:"response"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Response    string          `json:"response"`
+	Options     []commandOption `json:"options,omitempty"`
 }
 
 // GET /api/v1/guilds/:id/commands
@@ -39,7 +48,7 @@ func (h *Handler) ListCommands(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := h.Pool.Query(r.Context(), `
-        SELECT id::text, guild_id::text, name, description, response, creator_id::text, created_at
+        SELECT id::text, guild_id::text, name, description, response, options, creator_id::text, created_at
         FROM guild_commands WHERE guild_id = $1 ORDER BY name ASC
     `, guildID)
 	if err != nil {
@@ -50,7 +59,12 @@ func (h *Handler) ListCommands(w http.ResponseWriter, r *http.Request) {
 	out := []commandView{}
 	for rows.Next() {
 		var c commandView
-		if err := rows.Scan(&c.ID, &c.GuildID, &c.Name, &c.Description, &c.Response, &c.CreatorID, &c.CreatedAt); err == nil {
+		var optRaw []byte
+		if err := rows.Scan(&c.ID, &c.GuildID, &c.Name, &c.Description, &c.Response, &optRaw, &c.CreatorID, &c.CreatedAt); err == nil {
+			c.Options = []commandOption{}
+			if len(optRaw) > 0 {
+				_ = json.Unmarshal(optRaw, &c.Options)
+			}
 			out = append(out, c)
 		}
 	}
@@ -87,18 +101,31 @@ func (h *Handler) CreateCommand(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_response", "yanıt gerekli")
 		return
 	}
+	// Opsiyonları normalize et (en fazla 10, isim küçük harf-boşluksuz)
+	opts := []commandOption{}
+	for _, o := range req.Options {
+		o.Name = strings.ToLower(strings.TrimSpace(o.Name))
+		if o.Name == "" || strings.ContainsAny(o.Name, " /\\{}") {
+			continue
+		}
+		opts = append(opts, o)
+		if len(opts) >= 10 {
+			break
+		}
+	}
+	optJSON, _ := json.Marshal(opts)
 	id := h.IDs.Next()
 	_, err = h.Pool.Exec(r.Context(), `
-        INSERT INTO guild_commands (id, guild_id, name, description, response, creator_id)
-        VALUES ($1, $2, $3, $4, $5, $6)
-    `, id, guildID, req.Name, req.Description, req.Response, uid)
+        INSERT INTO guild_commands (id, guild_id, name, description, response, options, creator_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `, id, guildID, req.Name, req.Description, req.Response, optJSON, uid)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "conflict", "isim çakışıyor olabilir")
 		return
 	}
 	writeJSON(w, http.StatusCreated, commandView{
 		ID: int64ToStr(id), GuildID: int64ToStr(guildID),
-		Name: req.Name, Description: req.Description, Response: req.Response,
+		Name: req.Name, Description: req.Description, Response: req.Response, Options: opts,
 		CreatorID: int64ToStr(uid), CreatedAt: time.Now(),
 	})
 }
@@ -141,12 +168,41 @@ func (h *Handler) RunCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.ToLower(strings.TrimPrefix(r.URL.Query().Get("name"), "/"))
+	// Argümanlar JSON gövdeden: {"args": {"opt": "değer"}}
+	var body struct {
+		Args map[string]string `json:"args"`
+	}
+	_ = readJSON(r, &body)
+	if body.Args == nil {
+		body.Args = map[string]string{}
+	}
+
 	var response string
-	err = h.Pool.QueryRow(r.Context(), `SELECT response FROM guild_commands WHERE guild_id = $1 AND name = $2`, *ch.GuildID, name).Scan(&response)
+	var optRaw []byte
+	err = h.Pool.QueryRow(r.Context(), `SELECT response, options FROM guild_commands WHERE guild_id = $1 AND name = $2`, *ch.GuildID, name).Scan(&response, &optRaw)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "not_found", "/"+name+" tanımlı değil")
 		return
 	}
+	var opts []commandOption
+	if len(optRaw) > 0 {
+		_ = json.Unmarshal(optRaw, &opts)
+	}
+	// Zorunlu argüman kontrolü
+	for _, o := range opts {
+		if o.Required && strings.TrimSpace(body.Args[o.Name]) == "" {
+			writeError(w, http.StatusBadRequest, "missing_arg", "'"+o.Name+"' argümanı gerekli")
+			return
+		}
+	}
+	// Placeholder ikamesi: {opt} → değer, {user} → çağıran
+	for _, o := range opts {
+		response = strings.ReplaceAll(response, "{"+o.Name+"}", body.Args[o.Name])
+	}
+	if invoker, e := h.Users.ByID(r.Context(), uid); e == nil {
+		response = strings.ReplaceAll(response, "{user}", invoker.DisplayName)
+	}
+
 	// Yanıtı kanala mesaj olarak gönder
 	m := &repo.Message{
 		ID: h.IDs.Next(), ChannelID: channelID, AuthorID: uid, Content: response, CreatedAt: time.Now(),

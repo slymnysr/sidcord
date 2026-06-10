@@ -126,6 +126,15 @@ func (r *Invites) AcceptAndJoin(ctx context.Context, code string, userID int64) 
 		return 0, errors.New("invite_exhausted")
 	}
 
+	// Banlı kullanıcı davetle bile katılamaz
+	var banned bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM guild_bans WHERE guild_id = $1 AND user_id = $2)`, guildID, userID).Scan(&banned); err != nil {
+		return 0, err
+	}
+	if banned {
+		return 0, errors.New("banned")
+	}
+
 	// Üye ekle (zaten üyeyse hata vermez)
 	_, err = tx.Exec(ctx, `
         INSERT INTO guild_members (guild_id, user_id) VALUES ($1, $2)

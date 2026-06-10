@@ -11,11 +11,12 @@ import (
 )
 
 type createThreadReq struct {
-	Name                string `json:"name"`
-	Type                string `json:"type"`  // public_thread | private_thread
-	AutoArchiveMinutes  int32  `json:"auto_archive_minutes,omitempty"`
-	StarterMessageID    string `json:"starter_message_id,omitempty"`
-	Invitable           *bool  `json:"invitable,omitempty"`
+	Name                string   `json:"name"`
+	Type                string   `json:"type"`  // public_thread | private_thread
+	AutoArchiveMinutes  int32    `json:"auto_archive_minutes,omitempty"`
+	StarterMessageID    string   `json:"starter_message_id,omitempty"`
+	Invitable           *bool    `json:"invitable,omitempty"`
+	TagIDs              []string `json:"tag_ids,omitempty"` // forum etiketleri
 }
 
 func (h *Handler) CreateThread(w http.ResponseWriter, r *http.Request) {
@@ -117,6 +118,22 @@ func (h *Handler) CreateThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Forum etiketleri (yalnızca bu forumun kendi etiketleri kabul edilir)
+	for _, ts := range req.TagIDs {
+		tagID, perr := strconv.ParseInt(ts, 10, 64)
+		if perr != nil {
+			continue
+		}
+		if _, err := tx.Exec(r.Context(), `
+            INSERT INTO thread_tags (thread_id, tag_id)
+            SELECT $1, $2 WHERE EXISTS (SELECT 1 FROM forum_tags WHERE id = $2 AND channel_id = $3)
+            ON CONFLICT DO NOTHING
+        `, threadID, tagID, parentID); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "thread tag: "+err.Error())
+			return
+		}
+	}
+
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "commit")
 		return
@@ -151,7 +168,8 @@ func (h *Handler) ListThreads(w http.ResponseWriter, r *http.Request) {
 	q := `
         SELECT c.id, c.guild_id, c.parent_id, c.type::text, c.name, c.position, c.created_at,
                t.archived, t.archive_timestamp, t.auto_archive_minutes, t.locked, t.creator_id,
-               t.message_count, t.member_count
+               t.message_count, t.member_count,
+               COALESCE(ARRAY(SELECT tag_id::text FROM thread_tags WHERE thread_id = c.id), '{}') AS tag_ids
         FROM channels c
         JOIN thread_metadata t ON t.channel_id = c.id
         WHERE c.parent_id = $1
@@ -176,6 +194,7 @@ func (h *Handler) ListThreads(w http.ResponseWriter, r *http.Request) {
 		CreatorID          int64  `json:"creator_id,string"`
 		MessageCount       int32  `json:"message_count"`
 		MemberCount        int32  `json:"member_count"`
+		TagIDs             []string `json:"tag_ids"`
 	}
 	out := []threadView{}
 	for rows.Next() {
@@ -183,7 +202,7 @@ func (h *Handler) ListThreads(w http.ResponseWriter, r *http.Request) {
 		var archiveTs *string
 		if err := rows.Scan(&t.ID, &t.GuildID, &t.ParentID, &t.Type, &t.Name, &t.Position, &t.CreatedAt,
 			&t.Archived, &archiveTs, &t.AutoArchiveMinutes, &t.Locked, &t.CreatorID,
-			&t.MessageCount, &t.MemberCount); err != nil {
+			&t.MessageCount, &t.MemberCount, &t.TagIDs); err != nil {
 			continue
 		}
 		t.ArchiveTimestamp = archiveTs

@@ -38,6 +38,9 @@ func (h *Handler) AddReaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.publishReaction(r.Context(), ch, messageID, uid, emoji, "REACTION_ADD")
+	if ch.GuildID != nil {
+		h.applyReactionRoles(r.Context(), *ch.GuildID, uid, messageID, emoji, true)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -63,6 +66,9 @@ func (h *Handler) RemoveReaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.publishReaction(r.Context(), ch, messageID, uid, emoji, "REACTION_REMOVE")
+	if ch.GuildID != nil {
+		h.applyReactionRoles(r.Context(), *ch.GuildID, uid, messageID, emoji, false)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -149,3 +155,46 @@ func (h *Handler) publishReaction(ctx context.Context, ch *repo.Channel, message
 	}
 }
 
+
+// GET /messages/{messageID}/reactions/{emoji}/users — bir emojiye kim tepki verdi
+func (h *Handler) ListReactionUsers(w http.ResponseWriter, r *http.Request) {
+	messageID, err := parseID(r, "messageID")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "message id")
+		return
+	}
+	emoji, err := url.PathUnescape(chi.URLParam(r, "emoji"))
+	if err != nil || emoji == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "emoji")
+		return
+	}
+	uid := middleware.UserIDFrom(r.Context())
+	if ok, _, _ := h.canReadMessage(r, messageID, uid); !ok {
+		writeError(w, http.StatusForbidden, "forbidden", "yetersiz")
+		return
+	}
+	rows, err := h.Pool.Query(r.Context(), `
+        SELECT u.id::text, u.display_name, u.avatar_color
+        FROM message_reactions mr JOIN users u ON u.id = mr.user_id
+        WHERE mr.message_id = $1 AND mr.emoji = $2
+        ORDER BY u.display_name LIMIT 50
+    `, messageID, emoji)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	defer rows.Close()
+	type ru struct {
+		ID          string `json:"id"`
+		DisplayName string `json:"display_name"`
+		AvatarColor string `json:"avatar_color"`
+	}
+	out := []ru{}
+	for rows.Next() {
+		var u ru
+		if err := rows.Scan(&u.ID, &u.DisplayName, &u.AvatarColor); err == nil {
+			out = append(out, u)
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}

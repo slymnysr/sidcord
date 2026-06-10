@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -152,9 +153,10 @@ func (h *Handler) DeleteWebhook(w http.ResponseWriter, r *http.Request) {
 // === Public webhook execute (auth gerekmez, token doğrulanır) ===
 
 type executeWebhookReq struct {
-	Content   string `json:"content"`
-	Username  string `json:"username,omitempty"`
-	AvatarURL string `json:"avatar_url,omitempty"`
+	Content   string            `json:"content"`
+	Username  string            `json:"username,omitempty"`
+	AvatarURL string            `json:"avatar_url,omitempty"`
+	Embeds    []json.RawMessage `json:"embeds,omitempty"`
 }
 
 func (h *Handler) ExecuteWebhook(w http.ResponseWriter, r *http.Request) {
@@ -187,8 +189,8 @@ func (h *Handler) ExecuteWebhook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	if len(req.Content) == 0 || len(req.Content) > 4000 {
-		writeError(w, http.StatusBadRequest, "invalid_content", "1-4000 karakter")
+	if (len(req.Content) == 0 && len(req.Embeds) == 0) || len(req.Content) > 4000 {
+		writeError(w, http.StatusBadRequest, "invalid_content", "içerik veya embed gerekli (en fazla 4000 karakter)")
 		return
 	}
 
@@ -212,6 +214,21 @@ func (h *Handler) ExecuteWebhook(w http.ResponseWriter, r *http.Request) {
 	if err := h.Messages.Create(r.Context(), m); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "kaydedilemedi")
 		return
+	}
+	// Zengin embed'ler (renk/alan/footer)
+	h.storeRichEmbeds(r.Context(), m.ID, req.Embeds)
+	m.Embeds = req.Embeds // realtime/HTTP yanıtında inline dönsün
+	// Webhook isim/avatar override'ını kalıcı sakla + mesaja set et
+	var avatarArg *string
+	if overrideAvatar != "" {
+		avatarArg = &overrideAvatar
+	}
+	_, _ = h.Pool.Exec(r.Context(),
+		`INSERT INTO message_webhook (message_id, username, avatar_url, webhook_id) VALUES ($1, $2, $3, $4)`,
+		m.ID, overrideName, avatarArg, webhookID)
+	m.WebhookUsername = &overrideName
+	if overrideAvatar != "" {
+		m.WebhookAvatar = &overrideAvatar
 	}
 	// Publish with override fields
 	if h.Events != nil {

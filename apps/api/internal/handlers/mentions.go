@@ -31,9 +31,14 @@ var (
 // parseAndPersistMentions — kullanıcı + rol + everyone/here bahsetmelerini ayıklar.
 // İzin gerektiren bahsetmeleri (everyone, role[mentionable=false]) kontrol eder.
 // Bildirim oluşturur ve gateway'e yayar.
-func (h *Handler) parseAndPersistMentions(ctx context.Context, ch *repo.Channel, m *repo.Message) []int64 {
+func (h *Handler) parseAndPersistMentions(ctx context.Context, ch *repo.Channel, m *repo.Message, replyAuthor *int64) []int64 {
 	content := m.Content
 	mentionedUsers := map[int64]bool{}
+
+	// Yanıt verilen mesajın yazarını pingle (Discord davranışı)
+	if replyAuthor != nil && *replyAuthor != m.AuthorID {
+		mentionedUsers[*replyAuthor] = true
+	}
 
 	// 1) Username mention'ları
 	if matches := mentionUserRegex.FindAllStringSubmatch(content, -1); len(matches) > 0 {

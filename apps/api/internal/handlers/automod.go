@@ -175,3 +175,40 @@ func (h *Handler) DeleteAutomodRule(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+type updateAutomodReq struct {
+	Enabled *bool `json:"enabled,omitempty"`
+}
+
+// PATCH /guilds/{id}/automod-rules/{ruleID} — kuralı etkinleştir/devre dışı bırak
+func (h *Handler) UpdateAutomodRule(w http.ResponseWriter, r *http.Request) {
+	guildID, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "id")
+		return
+	}
+	ruleID, err := parseID(r, "ruleID")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "rule id")
+		return
+	}
+	uid := middleware.UserIDFrom(r.Context())
+	if !h.requirePerm(r, guildID, uid, perms.ManageGuild, w) {
+		return
+	}
+	var req updateAutomodReq
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if req.Enabled == nil {
+		writeError(w, http.StatusBadRequest, "nothing_to_update", "enabled gerekli")
+		return
+	}
+	if _, err := h.Pool.Exec(r.Context(),
+		`UPDATE automod_rules SET enabled = $1 WHERE id = $2 AND guild_id = $3`, *req.Enabled, ruleID, guildID); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "güncellenemedi")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

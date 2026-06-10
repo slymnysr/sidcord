@@ -82,6 +82,23 @@ func main() {
 		}
 	}()
 
+	// Zamanlanmış mesaj dağıtıcısı — her 20 saniyede vakti gelenleri gönderir
+	go func() {
+		ticker := time.NewTicker(20 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				h.DispatchDueScheduledMessages(ctx)
+				h.DispatchDueReminders(ctx)
+				h.ClearExpiredCustomStatuses(ctx)
+				h.DispatchDueEventReminders(ctx)
+			}
+		}
+	}()
+
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit

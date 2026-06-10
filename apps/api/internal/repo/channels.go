@@ -19,6 +19,9 @@ type Channel struct {
 	Position      int32     `json:"position"`
 	NSFW          bool      `json:"nsfw"`
 	RateLimitSec  int32     `json:"rate_limit_sec"`
+	AutoArchiveMinutes int32 `json:"auto_archive_minutes"`
+	UserLimit     int32     `json:"user_limit"`
+	Bitrate       int32     `json:"bitrate"`
 	LastMessageID *int64    `json:"last_message_id,string,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 }
@@ -38,9 +41,9 @@ func (r *Channels) Create(ctx context.Context, c *Channel) error {
 func (r *Channels) ByID(ctx context.Context, id int64) (*Channel, error) {
 	c := &Channel{}
 	err := r.pool.QueryRow(ctx, `
-        SELECT id, guild_id, parent_id, type::text, name, topic, position, nsfw, rate_limit_sec, last_message_id, created_at
+        SELECT id, guild_id, parent_id, type::text, name, topic, position, nsfw, rate_limit_sec, auto_archive_minutes, user_limit, bitrate, last_message_id, created_at
         FROM channels WHERE id = $1
-    `, id).Scan(&c.ID, &c.GuildID, &c.ParentID, &c.Type, &c.Name, &c.Topic, &c.Position, &c.NSFW, &c.RateLimitSec, &c.LastMessageID, &c.CreatedAt)
+    `, id).Scan(&c.ID, &c.GuildID, &c.ParentID, &c.Type, &c.Name, &c.Topic, &c.Position, &c.NSFW, &c.RateLimitSec, &c.AutoArchiveMinutes, &c.UserLimit, &c.Bitrate, &c.LastMessageID, &c.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -51,7 +54,7 @@ func (r *Channels) ForGuild(ctx context.Context, guildID int64) ([]Channel, erro
 	// Thread tipleri (public_thread, private_thread, news_thread) sidebar listesinde gözükmez;
 	// ChannelHeader > Thread'ler paneli üzerinden açılır
 	rows, err := r.pool.Query(ctx, `
-        SELECT id, guild_id, parent_id, type::text, name, topic, position, nsfw, rate_limit_sec, last_message_id, created_at
+        SELECT id, guild_id, parent_id, type::text, name, topic, position, nsfw, rate_limit_sec, auto_archive_minutes, user_limit, bitrate, last_message_id, created_at
         FROM channels WHERE guild_id = $1
           AND type::text NOT IN ('public_thread', 'private_thread', 'news_thread')
         ORDER BY position ASC, id ASC
@@ -63,7 +66,7 @@ func (r *Channels) ForGuild(ctx context.Context, guildID int64) ([]Channel, erro
 	var list []Channel
 	for rows.Next() {
 		var c Channel
-		if err := rows.Scan(&c.ID, &c.GuildID, &c.ParentID, &c.Type, &c.Name, &c.Topic, &c.Position, &c.NSFW, &c.RateLimitSec, &c.LastMessageID, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.GuildID, &c.ParentID, &c.Type, &c.Name, &c.Topic, &c.Position, &c.NSFW, &c.RateLimitSec, &c.AutoArchiveMinutes, &c.UserLimit, &c.Bitrate, &c.LastMessageID, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		list = append(list, c)

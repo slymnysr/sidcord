@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sidcord/api/internal/middleware"
@@ -17,8 +18,10 @@ import (
 type createMessageReq struct {
 	Content                string                  `json:"content"`
 	RepliedToID            string                  `json:"replied_to_id,omitempty"`
+	ReplyPing              *bool                   `json:"reply_ping,omitempty"` // yanıtta orijinal yazarı pingle (varsayılan true)
 	Attachments            []createAttachmentInput `json:"attachments,omitempty"`
 	ForwardedFromMessageID string                  `json:"forwarded_from_message_id,omitempty"`
+	Embeds                 []json.RawMessage       `json:"embeds,omitempty"` // zengin embed (renk/alan/footer)
 }
 
 type createAttachmentInput struct {
@@ -39,7 +42,12 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	if (len(req.Content) == 0 && len(req.Attachments) == 0) || len(req.Content) > 4000 {
+	// @silent: mesajı kimseye bildirim göndermeden gönder (Discord paritesi)
+	silent := strings.HasPrefix(req.Content, "@silent ") || req.Content == "@silent"
+	if silent {
+		req.Content = strings.TrimSpace(strings.TrimPrefix(req.Content, "@silent"))
+	}
+	if (len(req.Content) == 0 && len(req.Attachments) == 0 && len(req.Embeds) == 0 && !silent) || len(req.Content) > 4000 {
 		writeError(w, http.StatusBadRequest, "invalid_content", "mesaj boş olamaz, en fazla 4000 karakter")
 		return
 	}
@@ -77,10 +85,29 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		roleIDs, _ := h.Roles.MemberRoleIDs(r.Context(), *ch.GuildID, uid)
+
+		// Doğrulama seviyesi + müstehcen içerik filtresi (sunucu ayarlarının gerçek davranışı).
+		// Muafiyet için @everyone HARİÇ atanmış rol sayısı kullanılır.
+		if g, gerr := h.Guilds.ByID(r.Context(), *ch.GuildID); gerr == nil {
+			assignedRoles := h.assignedRoleCount(r.Context(), *ch.GuildID, uid)
+			if code, msg := h.checkVerificationGate(r.Context(), g, uid, assignedRoles); code != "" {
+				writeError(w, http.StatusForbidden, code, msg)
+				return
+			}
+			fileNames := make([]string, 0, len(req.Attachments))
+			for _, a := range req.Attachments {
+				fileNames = append(fileNames, a.Filename)
+			}
+			if code, msg := h.checkExplicitContent(g, ch, uid, assignedRoles, req.Content, fileNames); code != "" {
+				writeError(w, http.StatusBadRequest, code, msg)
+				return
+			}
+		}
+
 		// AutoMod kontrolü (ManageGuild izni varsa muaf)
 		if !perms.Has(chanPerms, perms.ManageGuild) && h.AutoMod != nil {
-			roleIDs, _ := h.Roles.MemberRoleIDs(r.Context(), *ch.GuildID, uid)
-			decision := h.AutoMod.Inspect(r.Context(), *ch.GuildID, ch.ID, roleIDs, req.Content)
+			decision := h.AutoMod.Inspect(r.Context(), *ch.GuildID, ch.ID, uid, roleIDs, req.Content)
 			if decision != nil && decision.Triggered {
 				h.AutoMod.LogAction(r.Context(), h.IDs.Next(), decision.RuleID, *ch.GuildID, uid, ch.ID,
 					req.Content, decision.MatchedText, "block")
@@ -120,12 +147,19 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Reply parent kontrolü
 	var repliedToID *int64
+	var replyAuthorID *int64 // ping atılacak orijinal yazar
 	if req.RepliedToID != "" {
 		rid, err := strconv.ParseInt(req.RepliedToID, 10, 64)
 		if err == nil {
 			parent, perr := h.Messages.ByID(r.Context(), rid)
 			if perr == nil && parent.ChannelID == channelID {
 				repliedToID = &rid
+				// Varsayılan: yanıtta orijinal yazarı pingle (kendine yanıt hariç)
+				ping := req.ReplyPing == nil || *req.ReplyPing
+				if ping && parent.AuthorID != uid {
+					aid := parent.AuthorID
+					replyAuthorID = &aid
+				}
 			}
 		}
 	}
@@ -156,6 +190,9 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	// Mesajda URL varsa link embed parse et (asenkron — basit OG meta fetcher)
 	go h.parseAndStoreEmbeds(m.ID, req.Content)
+	// Gönderen tarafından sağlanan zengin embed'ler (renk/alan/footer)
+	h.storeRichEmbeds(r.Context(), m.ID, req.Embeds)
+	m.Embeds = req.Embeds // realtime/HTTP yanıtında inline dönsün
 
 	// Kanalın last_message_id'sini güncelle (unread badge için)
 	_, _ = h.Pool.Exec(r.Context(), `UPDATE channels SET last_message_id = $1 WHERE id = $2`, m.ID, channelID)
@@ -180,11 +217,16 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Mention parse + bildirim
-	mentioned := h.parseAndPersistMentions(r.Context(), ch, m)
+	// Mention parse + bildirim (yanıt yazarı da pinglenir). @silent ise hiç bildirim yok.
+	var mentioned []int64
+	if !silent {
+		mentioned = h.parseAndPersistMentions(r.Context(), ch, m, replyAuthorID)
+		// Anahtar kelime bildirimleri (mention edilmeyenlere)
+		h.notifyKeywords(r.Context(), ch, m, mentioned)
+	}
 
 	// DM mesajları için: mention dışında kalan diğer katılımcılara dm_message bildirimi
-	if ch.GuildID == nil {
+	if ch.GuildID == nil && !silent {
 		others, _ := h.DMs.Participants(r.Context(), ch.ID)
 		mentionedSet := map[int64]bool{}
 		for _, mid := range mentioned {

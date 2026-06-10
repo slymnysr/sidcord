@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/mail"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -49,6 +50,7 @@ type authResp struct {
 	User         *repo.User `json:"user"`
 	AccessToken  string     `json:"access_token"`
 	RefreshToken string     `json:"refresh_token"`
+	SessionID    string     `json:"session_id"`
 	ExpiresAt    time.Time  `json:"expires_at"`
 }
 
@@ -116,6 +118,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 type loginReq struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	TOTPCode string `json:"totp_code,omitempty"`
 }
 
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
@@ -149,6 +152,19 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		_ = h.LoginAttempts.Record(r.Context(), h.IDs.Next(), req.Email, clientIP, false)
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "e-posta veya parola hatalı")
 		return
+	}
+
+	// 2FA: etkinse geçerli TOTP kodu iste
+	if user.TOTPEnabled {
+		if req.TOTPCode == "" {
+			writeError(w, http.StatusUnauthorized, "2fa_required", "iki adımlı doğrulama kodu gerekli")
+			return
+		}
+		if user.TOTPSecret == nil || !auth.ValidateTOTP(*user.TOTPSecret, req.TOTPCode) {
+			_ = h.LoginAttempts.Record(r.Context(), h.IDs.Next(), req.Email, clientIP, false)
+			writeError(w, http.StatusUnauthorized, "invalid_2fa", "iki adımlı doğrulama kodu hatalı")
+			return
+		}
 	}
 
 	_ = h.LoginAttempts.Record(r.Context(), h.IDs.Next(), req.Email, clientIP, true)
@@ -213,8 +229,9 @@ func (h *Handler) issueTokens(r *http.Request, user *repo.User) (*authResp, erro
 		return nil, err
 	}
 	ua := r.UserAgent()
+	sessionID := h.IDs.Next()
 	if err := h.RefreshTokens.Create(r.Context(), &repo.RefreshToken{
-		ID:        h.IDs.Next(),
+		ID:        sessionID,
 		UserID:    user.ID,
 		TokenHash: hash,
 		UserAgent: &ua,
@@ -226,6 +243,7 @@ func (h *Handler) issueTokens(r *http.Request, user *repo.User) (*authResp, erro
 		User:         user,
 		AccessToken:  access,
 		RefreshToken: raw,
+		SessionID:    strconv.FormatInt(sessionID, 10),
 		ExpiresAt:    exp,
 	}, nil
 }
@@ -276,5 +294,57 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "kaydedilemedi")
 		return
 	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type deleteAccountReq struct {
+	Password string `json:"password"`
+}
+
+// DELETE /api/v1/users/me — hesabı sil (anonimleştir + login engelle). Parola onayı gerekir.
+func (h *Handler) DeleteMyAccount(w http.ResponseWriter, r *http.Request) {
+	var req deleteAccountReq
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	uid := middleware.UserIDFrom(r.Context())
+	user, err := h.Users.ByID(r.Context(), uid)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "kullanıcı")
+		return
+	}
+	ok, err := auth.VerifyPassword(req.Password, user.PasswordHash)
+	if err != nil || !ok {
+		writeError(w, http.StatusForbidden, "wrong_password", "parola yanlış")
+		return
+	}
+	// Sahip olduğu sunucular varsa silmeyi reddet (önce devret/sil)
+	var ownedCount int
+	_ = h.Pool.QueryRow(r.Context(), `SELECT count(*) FROM guilds WHERE owner_id = $1`, uid).Scan(&ownedCount)
+	if ownedCount > 0 {
+		writeError(w, http.StatusConflict, "owns_guilds", "önce sahibi olduğun sunucuları sil veya devret")
+		return
+	}
+	// Anonimleştir: PII temizle, login imkânsız hale getir, deleted_at işaretle
+	randHash, _ := auth.HashPassword(strconv.FormatInt(h.IDs.Next(), 10) + "_deleted")
+	_, err = h.Pool.Exec(r.Context(), `
+		UPDATE users SET
+			username = 'deleted_' || id::text,
+			email = 'deleted_' || id::text || '@deleted.local',
+			display_name = 'Silinmiş Kullanıcı',
+			password_hash = $2,
+			avatar_url = NULL, banner_url = NULL, bio = NULL, pronouns = NULL,
+			custom_status_text = NULL, custom_status_emoji = NULL, custom_status_expires_at = NULL,
+			totp_secret = NULL, totp_enabled = FALSE, avatar_decoration = NULL,
+			status = 'offline', deleted_at = now()
+		WHERE id = $1
+	`, uid, randHash)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "silinemedi: "+err.Error())
+		return
+	}
+	// Tüm oturumları iptal et
+	_ = h.RefreshTokens.RevokeAllExcept(r.Context(), uid, 0)
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -84,7 +84,7 @@ func (h *Handler) CreateChannel(w http.ResponseWriter, r *http.Request) {
 
 func validChannelType(t string) bool {
 	switch t {
-	case "text", "voice", "announcement", "forum", "stage", "category":
+	case "text", "voice", "announcement", "forum", "stage", "category", "media":
 		return true
 	}
 	return false

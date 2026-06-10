@@ -150,8 +150,8 @@ func (h *Handler) PlaySound(w http.ResponseWriter, r *http.Request) {
 	}
 	uid := middleware.UserIDFrom(r.Context())
 	ch, err := h.Channels.ByID(r.Context(), channelID)
-	if err != nil || ch.GuildID == nil || ch.Type != "voice" {
-		writeError(w, http.StatusBadRequest, "not_voice", "ses kanalı olmalı")
+	if err != nil || ch.GuildID == nil || (ch.Type != "voice" && ch.Type != "stage") {
+		writeError(w, http.StatusBadRequest, "not_voice", "ses veya sahne kanalı olmalı")
 		return
 	}
 	if ok, _ := h.Guilds.IsMember(r.Context(), *ch.GuildID, uid); !ok {

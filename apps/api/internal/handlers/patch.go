@@ -22,6 +22,14 @@ type updateGuildReq struct {
 	BannerURL   *string `json:"banner_url,omitempty"`
 	Description *string `json:"description,omitempty"`
 	IsPublic    *bool   `json:"is_public,omitempty"`
+	OwnerID     *string `json:"owner_id,omitempty"`
+	VanityURLCode     *string `json:"vanity_url_code,omitempty"`
+	AfkChannelID      *string `json:"afk_channel_id,omitempty"`
+	AfkTimeoutSec     *int32  `json:"afk_timeout_sec,omitempty"`
+	SystemChannelID   *string `json:"system_channel_id,omitempty"`
+	VerificationLevel *int32  `json:"verification_level,omitempty"`
+	ExplicitContentFilter *int32 `json:"explicit_content_filter,omitempty"`
+	AutoRoleID        *string `json:"auto_role_id,omitempty"`
 }
 
 func (h *Handler) UpdateGuild(w http.ResponseWriter, r *http.Request) {
@@ -73,6 +81,76 @@ func (h *Handler) UpdateGuild(w http.ResponseWriter, r *http.Request) {
 	if req.IsPublic != nil {
 		addSet("is_public", *req.IsPublic)
 	}
+	if req.VanityURLCode != nil {
+		v := strings.TrimSpace(*req.VanityURLCode)
+		if v == "" {
+			addSet("vanity_url_code", nil)
+		} else {
+			addSet("vanity_url_code", v)
+		}
+	}
+	if req.VerificationLevel != nil {
+		addSet("verification_level", *req.VerificationLevel)
+	}
+	if req.ExplicitContentFilter != nil {
+		addSet("explicit_content_filter", *req.ExplicitContentFilter)
+	}
+	if req.AfkChannelID != nil {
+		if *req.AfkChannelID == "" {
+			addSet("afk_channel_id", nil)
+		} else if id, e := strconv.ParseInt(*req.AfkChannelID, 10, 64); e == nil {
+			addSet("afk_channel_id", id)
+		}
+	}
+	if req.AfkTimeoutSec != nil {
+		v := *req.AfkTimeoutSec
+		if v < 60 {
+			v = 60
+		}
+		if v > 3600 {
+			v = 3600
+		}
+		addSet("afk_timeout_sec", v)
+	}
+	if req.SystemChannelID != nil {
+		if *req.SystemChannelID == "" {
+			addSet("system_channel_id", nil)
+		} else if id, e := strconv.ParseInt(*req.SystemChannelID, 10, 64); e == nil {
+			addSet("system_channel_id", id)
+		}
+	}
+	if req.AutoRoleID != nil {
+		if *req.AutoRoleID == "" {
+			addSet("auto_role_id", nil)
+		} else if id, e := strconv.ParseInt(*req.AutoRoleID, 10, 64); e == nil {
+			// Rol bu sunucuya ait olmalı
+			var belongs bool
+			_ = h.Pool.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM roles WHERE id = $1 AND guild_id = $2)`, id, guildID).Scan(&belongs)
+			if !belongs {
+				writeError(w, http.StatusBadRequest, "invalid_role", "rol bu sunucuya ait değil")
+				return
+			}
+			addSet("auto_role_id", id)
+		}
+	}
+	if req.OwnerID != nil {
+		// Sahipliği yalnızca mevcut sahip devredebilir; yeni sahip üye olmalı
+		g, gerr := h.Guilds.ByID(r.Context(), guildID)
+		if gerr != nil || g.OwnerID != uid {
+			writeError(w, http.StatusForbidden, "forbidden", "sahipliği yalnızca mevcut sahip devredebilir")
+			return
+		}
+		newOwner, perr := strconv.ParseInt(*req.OwnerID, 10, 64)
+		if perr != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "owner_id parse")
+			return
+		}
+		if ok, _ := h.Guilds.IsMember(r.Context(), guildID, newOwner); !ok {
+			writeError(w, http.StatusBadRequest, "not_member", "yeni sahip sunucu üyesi olmalı")
+			return
+		}
+		addSet("owner_id", newOwner)
+	}
 	if len(sets) == 0 {
 		writeError(w, http.StatusBadRequest, "nothing_to_update", "değişiklik yok")
 		return
@@ -98,6 +176,7 @@ type updateChannelReq struct {
 	Position     *int32  `json:"position,omitempty"`
 	NSFW         *bool   `json:"nsfw,omitempty"`
 	RateLimitSec *int32  `json:"rate_limit_sec,omitempty"`
+	AutoArchiveMinutes *int32 `json:"auto_archive_minutes,omitempty"`
 	ParentID     *string `json:"parent_id,omitempty"`
 	Bitrate      *int32  `json:"bitrate,omitempty"`
 	UserLimit    *int32  `json:"user_limit,omitempty"`
@@ -116,7 +195,48 @@ func (h *Handler) UpdateChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ch.GuildID == nil {
-		writeError(w, http.StatusBadRequest, "invalid", "DM kanalı güncellenemez")
+		// Grup DM: yalnızca isim değiştirilebilir, sahip veya katılımcı yapabilir (Discord davranışı)
+		if ch.Type != "group_dm" {
+			writeError(w, http.StatusBadRequest, "invalid", "DM kanalı güncellenemez")
+			return
+		}
+		if ok, _ := h.DMs.IsParticipant(r.Context(), ch.ID, uid); !ok {
+			writeError(w, http.StatusForbidden, "forbidden", "bu grubun üyesi değilsin")
+			return
+		}
+		var req updateChannelReq
+		if err := readJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+		if req.Name == nil {
+			writeError(w, http.StatusBadRequest, "invalid", "grup DM'de yalnızca isim değiştirilebilir")
+			return
+		}
+		n := strings.TrimSpace(*req.Name)
+		if n == "" || len(n) > 100 {
+			writeError(w, http.StatusBadRequest, "invalid_name", "1-100 karakter")
+			return
+		}
+		if _, err := h.Pool.Exec(r.Context(), `UPDATE channels SET name = $2 WHERE id = $1`, ch.ID, n); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "güncellenemedi")
+			return
+		}
+		ch.Name = n
+		// Tüm katılımcılara bildir (DM sidebar adını günceller)
+		if rows, err := h.Pool.Query(r.Context(), `SELECT user_id FROM dm_participants WHERE channel_id = $1`, ch.ID); err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var pid int64
+				if rows.Scan(&pid) == nil {
+					h.Events.ToUser(r.Context(), pid, "CHANNEL_UPDATE", map[string]any{
+						"channel_id": strconv.FormatInt(ch.ID, 10),
+						"name":       n,
+					})
+				}
+			}
+		}
+		writeJSON(w, http.StatusOK, ch)
 		return
 	}
 	if !h.requirePerm(r, *ch.GuildID, uid, perms.ManageChannels, w) {
@@ -157,6 +277,9 @@ func (h *Handler) UpdateChannel(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		addSet("rate_limit_sec", val)
+	}
+	if req.AutoArchiveMinutes != nil {
+		addSet("auto_archive_minutes", *req.AutoArchiveMinutes)
 	}
 	if req.Bitrate != nil {
 		addSet("bitrate", *req.Bitrate)
@@ -200,6 +323,9 @@ type updateMeReq struct {
 	AvatarURL   *string `json:"avatar_url,omitempty"`
 	BannerURL   *string `json:"banner_url,omitempty"`
 	AvatarColor *string `json:"avatar_color,omitempty"`
+	Pronouns    *string `json:"pronouns,omitempty"`
+	AccentColor *string `json:"accent_color,omitempty"`
+	AvatarDecoration *string `json:"avatar_decoration,omitempty"`
 }
 
 func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
@@ -235,6 +361,20 @@ func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.BannerURL != nil {
 		addSet("banner_url", *req.BannerURL)
+	}
+	if req.Pronouns != nil {
+		addSet("pronouns", strings.TrimSpace(*req.Pronouns))
+	}
+	if req.AccentColor != nil {
+		addSet("accent_color", *req.AccentColor)
+	}
+	if req.AvatarDecoration != nil {
+		d := strings.TrimSpace(*req.AvatarDecoration)
+		if d == "" {
+			addSet("avatar_decoration", nil)
+		} else {
+			addSet("avatar_decoration", d)
+		}
 	}
 	if req.AvatarColor != nil {
 		addSet("avatar_color", *req.AvatarColor)

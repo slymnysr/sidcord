@@ -1,12 +1,82 @@
 package handlers
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/sidcord/api/internal/middleware"
 	"github.com/sidcord/api/internal/perms"
+	"github.com/sidcord/api/internal/repo"
 )
+
+// DispatchDueEventReminders — 15 dk içinde başlayacak etkinliklerin abonelerine bir kez hatırlatma gönderir.
+// Ticker'dan çağrılır.
+func (h *Handler) DispatchDueEventReminders(ctx context.Context) {
+	rows, err := h.Pool.Query(ctx, `
+		SELECT id, guild_id, channel_id, creator_id, name
+		FROM guild_events
+		WHERE status = 'scheduled' AND reminder_sent = FALSE
+		  AND scheduled_start_at <= now() + interval '15 minutes'
+		  AND scheduled_start_at > now() - interval '5 minutes'
+	`)
+	if err != nil {
+		return
+	}
+	type ev struct {
+		id, guildID, creatorID int64
+		channelID              *int64
+		name                   string
+	}
+	var due []ev
+	for rows.Next() {
+		var e ev
+		if err := rows.Scan(&e.id, &e.guildID, &e.channelID, &e.creatorID, &e.name); err == nil {
+			due = append(due, e)
+		}
+	}
+	rows.Close()
+
+	for _, e := range due {
+		subRows, err := h.Pool.Query(ctx, `SELECT user_id FROM guild_event_subscribers WHERE event_id = $1`, e.id)
+		if err != nil {
+			continue
+		}
+		var subs []int64
+		for subRows.Next() {
+			var uid int64
+			if err := subRows.Scan(&uid); err == nil {
+				subs = append(subs, uid)
+			}
+		}
+		subRows.Close()
+
+		guildID := e.guildID
+		for _, uid := range subs {
+			n := &repo.Notification{
+				ID:        h.IDs.Next(),
+				UserID:    uid,
+				Type:      "event_reminder",
+				ChannelID: e.channelID,
+				GuildID:   &guildID,
+				ActorID:   &e.creatorID,
+			}
+			_ = h.Notifications.Create(ctx, n)
+			if h.Redis != nil {
+				payload, _ := json.Marshal(map[string]any{
+					"type":         "NOTIFICATION",
+					"notification": n,
+					"event_name":   e.name,
+					"ts":           time.Now().UnixMilli(),
+				})
+				_, _ = h.Redis.Publish(ctx, "sidcord:user:"+strconv.FormatInt(uid, 10), payload).Result()
+			}
+		}
+		_, _ = h.Pool.Exec(ctx, `UPDATE guild_events SET reminder_sent = TRUE WHERE id = $1`, e.id)
+	}
+}
 
 type eventView struct {
 	ID               string    `json:"id"`

@@ -17,6 +17,78 @@ type friendReq struct {
 	UserID   string `json:"user_id,omitempty"`
 }
 
+type reportReq struct {
+	Reason string `json:"reason,omitempty"`
+}
+
+type noteReq struct {
+	Note string `json:"note"`
+}
+
+// POST /users/me/verify-email — e-postayı doğrulanmış işaretle (MVP: tek tıkla)
+// GET /users/{userID}/note — bu kullanıcı hakkında tuttuğun özel not
+func (h *Handler) GetUserNote(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserIDFrom(r.Context())
+	targetID, err := strconv.ParseInt(chi.URLParam(r, "userID"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "user id")
+		return
+	}
+	var note string
+	_ = h.Pool.QueryRow(r.Context(),
+		`SELECT note FROM user_notes WHERE owner_id = $1 AND target_id = $2`, uid, targetID).Scan(&note)
+	writeJSON(w, http.StatusOK, map[string]string{"note": note})
+}
+
+// PUT /users/{userID}/note — notu kaydet (boş = sil)
+func (h *Handler) SetUserNote(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserIDFrom(r.Context())
+	targetID, err := strconv.ParseInt(chi.URLParam(r, "userID"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "user id")
+		return
+	}
+	var req noteReq
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	note := strings.TrimSpace(req.Note)
+	if note == "" {
+		_, _ = h.Pool.Exec(r.Context(), `DELETE FROM user_notes WHERE owner_id = $1 AND target_id = $2`, uid, targetID)
+	} else {
+		_, err = h.Pool.Exec(r.Context(), `
+            INSERT INTO user_notes (owner_id, target_id, note) VALUES ($1, $2, $3)
+            ON CONFLICT (owner_id, target_id) DO UPDATE SET note = EXCLUDED.note, updated_at = NOW()
+        `, uid, targetID, note)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "kaydedilemedi")
+			return
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// POST /users/{userID}/report — kullanıcı profilini moderasyona bildir
+func (h *Handler) ReportUser(w http.ResponseWriter, r *http.Request) {
+	uid := middleware.UserIDFrom(r.Context())
+	targetID, err := strconv.ParseInt(chi.URLParam(r, "userID"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "user id")
+		return
+	}
+	var req reportReq
+	_ = readJSON(r, &req)
+	_, err = h.Pool.Exec(r.Context(),
+		`INSERT INTO user_reports (id, reporter_id, target_id, reason) VALUES ($1, $2, $3, $4)`,
+		h.IDs.Next(), uid, targetID, strings.TrimSpace(req.Reason))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "bildirilemedi")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *Handler) SendFriendRequest(w http.ResponseWriter, r *http.Request) {
 	var req friendReq
 	if err := readJSON(r, &req); err != nil {
@@ -101,7 +173,7 @@ func (h *Handler) BlockUser(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err = h.Pool.Exec(r.Context(), `
         INSERT INTO friendships (user_a_id, user_b_id, status, requested_by)
-        VALUES (LEAST($1, $2), GREATEST($1, $2), 'blocked', $1)
+        VALUES (LEAST($1::bigint, $2::bigint), GREATEST($1::bigint, $2::bigint), 'blocked', $1::bigint)
         ON CONFLICT (user_a_id, user_b_id) DO UPDATE
         SET status = 'blocked', requested_by = EXCLUDED.requested_by, updated_at = NOW()
     `, uid, otherID)
@@ -121,11 +193,15 @@ func (h *Handler) UnblockUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uid := middleware.UserIDFrom(r.Context())
-	_, _ = h.Pool.Exec(r.Context(), `
+	if _, err := h.Pool.Exec(r.Context(), `
         DELETE FROM friendships
-        WHERE user_a_id = LEAST($1, $2) AND user_b_id = GREATEST($1, $2)
-          AND status = 'blocked' AND requested_by = $1
-    `, uid, otherID)
+        WHERE user_a_id = LEAST($1::bigint, $2::bigint) AND user_b_id = GREATEST($1::bigint, $2::bigint)
+          AND status = 'blocked' AND requested_by = $1::bigint
+    `, uid, otherID); err != nil {
+		h.logger.Error("unblock", zap.Error(err))
+		writeError(w, http.StatusInternalServerError, "internal", "engel kaldırılamadı")
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

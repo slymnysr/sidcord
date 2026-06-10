@@ -15,6 +15,17 @@ type Config struct {
 	JWTSecret     string
 	Environment   string
 	WorkerID      int64
+	// Hesap bağlantıları (Connections) OAuth — boşsa GitHub doğrulaması kapalı, elle ekleme çalışır
+	GitHubClientID     string
+	GitHubClientSecret string
+	PublicBaseURL      string
+	// İşlem mailleri (şifre sıfırlama/doğrulama) — dev default'u MailHog (localhost:1025)
+	SMTPHost   string
+	SMTPPort   string
+	SMTPUser   string
+	SMTPPass   string
+	MailFrom   string
+	WebBaseURL string
 }
 
 func Load() *Config {
@@ -25,9 +36,19 @@ func Load() *Config {
 		PostgresDSN:   getEnv("POSTGRES_DSN", "postgres://sidcord:sidcord_dev@localhost:5433/sidcord?sslmode=disable"),
 		RedisAddr:     getEnv("REDIS_HOST", "localhost") + ":" + getEnv("REDIS_PORT", "6379"),
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),
-		JWTSecret:     getEnv("JWT_SECRET", "dev_secret_change_me"),
+		// NOT: Gateway'in (Elixir) default'u ile AYNI olmalı, yoksa WS token doğrulaması 403 verir
+		JWTSecret:     getEnv("JWT_SECRET", "dev_jwt_secret_change_in_prod_at_least_32_chars"),
 		Environment:   getEnv("NODE_ENV", "development"),
 		WorkerID:      parseInt64(getEnv("WORKER_ID", "1")),
+		GitHubClientID:     getEnv("GITHUB_CLIENT_ID", ""),
+		GitHubClientSecret: getEnv("GITHUB_CLIENT_SECRET", ""),
+		PublicBaseURL:      getEnv("PUBLIC_BASE_URL", "http://localhost:8080"),
+		SMTPHost:           getEnv("SMTP_HOST", "localhost"),
+		SMTPPort:           getEnv("SMTP_PORT", "1025"),
+		SMTPUser:           getEnv("SMTP_USER", ""),
+		SMTPPass:           getEnv("SMTP_PASS", ""),
+		MailFrom:           getEnv("MAIL_FROM", "Sidcord <no-reply@sidcord.local>"),
+		WebBaseURL:         getEnv("WEB_BASE_URL", "http://localhost:3000"),
 	}
 }
 

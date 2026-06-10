@@ -11,6 +11,7 @@ import (
 	"github.com/sidcord/api/internal/automod"
 	"github.com/sidcord/api/internal/config"
 	"github.com/sidcord/api/internal/events"
+	"github.com/sidcord/api/internal/mailer"
 	"github.com/sidcord/api/internal/repo"
 	"github.com/sidcord/api/internal/snowflake"
 	"github.com/sidcord/api/internal/storage"
@@ -28,6 +29,7 @@ type Handler struct {
 	Storage *storage.Storage
 	Events  *events.Publisher
 	AutoMod *automod.Engine
+	Mailer  *mailer.Mailer
 
 	Users         *repo.Users
 	Guilds        *repo.Guilds
@@ -59,6 +61,7 @@ func New(logger *zap.Logger, cfg *config.Config, pool *pgxpool.Pool, rdb *redis.
 		Storage:       store,
 		Events:        events.New(rdb),
 		AutoMod:       automod.New(pool),
+		Mailer:        mailer.New(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.MailFrom),
 		Users:         repo.NewUsers(pool),
 		Guilds:        repo.NewGuilds(pool),
 		Channels:      repo.NewChannels(pool),
