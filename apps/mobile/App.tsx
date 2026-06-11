@@ -17,6 +17,13 @@ export default function App() {
   const [booting, setBooting] = useState(true);
   const [me, setMe] = useState<User | null>(null);
   const [openChannel, setOpenChannel] = useState<OpenChannel | null>(null);
+  // Sohbetten ana ekrana dönüşte listeleri/okunmamışları tazele
+  const [homeRefresh, setHomeRefresh] = useState(0);
+
+  function closeChannel() {
+    setOpenChannel(null);
+    setHomeRefresh((n) => n + 1);
+  }
 
   // Açılış: kayıtlı sunucu + token varsa otomatik giriş
   useEffect(() => {
@@ -35,7 +42,7 @@ export default function App() {
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
       if (openChannel) {
-        setOpenChannel(null);
+        closeChannel();
         return true;
       }
       return false;
@@ -61,9 +68,9 @@ export default function App() {
         ) : !me ? (
           <LoginScreen onLogin={setMe} />
         ) : openChannel ? (
-          <ChatScreen channel={openChannel} me={me} onBack={() => setOpenChannel(null)} />
+          <ChatScreen channel={openChannel} me={me} onBack={closeChannel} />
         ) : (
-          <HomeScreen me={me} onOpenChannel={setOpenChannel} onLogout={logout} />
+          <HomeScreen me={me} refreshKey={homeRefresh} onOpenChannel={setOpenChannel} onLogout={logout} />
         )}
       </SafeAreaView>
     </SafeAreaProvider>

@@ -180,8 +180,26 @@ export function ChatScreen({ channel, me, onBack }: Props) {
         onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
         contentContainerStyle={{ paddingVertical: 8 }}
         renderItem={({ item, index }) => {
+          const prevAny = messages[index - 1];
+          const newDay =
+            !prevAny ||
+            new Date(prevAny.created_at).toDateString() !== new Date(item.created_at).toDateString();
+          const dayDivider = newDay ? (
+            <View style={s.dayRow}>
+              <View style={s.dayLine} />
+              <Text style={s.dayText}>
+                {new Date(item.created_at).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })}
+              </Text>
+              <View style={s.dayLine} />
+            </View>
+          ) : null;
           if (item.system) {
-            return <Text style={s.system}>→ {item.content}</Text>;
+            return (
+              <View>
+                {dayDivider}
+                <Text style={s.system}>→ {item.content}</Text>
+              </View>
+            );
           }
           const prev = messages[index - 1];
           const grouped =
@@ -193,6 +211,7 @@ export function ChatScreen({ channel, me, onBack }: Props) {
           const msgReactions = reactions[item.id] ?? [];
           return (
             <Pressable onLongPress={() => setMenuFor(item)} delayLongPress={250}>
+              {dayDivider}
               {item.replied_to_id && (
                 <View style={s.replyPreviewRow}>
                   <Text style={s.replyPreviewText} numberOfLines={1}>
@@ -341,6 +360,9 @@ const s = StyleSheet.create({
   headerIcon: { color: colors.inkTertiary, fontSize: 18, fontWeight: '800' },
   headerName: { color: colors.ink, fontSize: 17, fontWeight: '800', flex: 1 },
   system: { color: colors.inkTertiary, fontSize: 13, paddingHorizontal: 16, paddingVertical: 6 },
+  dayRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, marginTop: 14, marginBottom: 2 },
+  dayLine: { flex: 1, height: 1, backgroundColor: colors.line },
+  dayText: { color: colors.inkTertiary, fontSize: 11, fontWeight: '700' },
   msgRow: { flexDirection: 'row', paddingHorizontal: 12, marginTop: 12, gap: 10 },
   msgRowGrouped: { marginTop: 2 },
   avatar: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },

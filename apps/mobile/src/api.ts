@@ -95,6 +95,12 @@ export interface Channel {
   type: string;
   name: string;
   position: number;
+  last_message_id?: string;
+}
+export interface ReadState {
+  channel_id: string;
+  last_message_id?: string;
+  mention_count: number;
 }
 export interface Message {
   id: string;
@@ -117,6 +123,7 @@ export interface DMChannel {
   type: 'dm' | 'group_dm';
   name: string;
   participants: string[];
+  last_message_id?: string;
 }
 
 export const api = {
@@ -164,4 +171,9 @@ export const api = {
   dms: () => request<DMChannel[]>('/users/me/channels'),
   ack: (channelId: string) =>
     request<void>(`/channels/${channelId}/ack`, { method: 'POST', body: '{}' }),
+  readStates: () => request<ReadState[]>('/users/me/read-states'),
+  acceptInvite: (code: string) =>
+    request<Guild>(`/invites/${encodeURIComponent(code.trim())}/accept`, { method: 'POST' }),
+  createGuild: (name: string) =>
+    request<Guild>('/guilds', { method: 'POST', body: JSON.stringify({ name }) }),
 };
