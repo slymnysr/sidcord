@@ -10,6 +10,8 @@ export default defineConfig({
         // Sabit bağımlılıkları ayrı 'vendor' chunk'larına al (tarayıcı önbelleği için)
         manualChunks(id) {
           if (id.includes('node_modules')) {
+            // Lazy yüklenen büyük veriler vendor'a GİRMESİN — kendi dynamic chunk'larında kalsınlar
+            if (id.includes('unicode-emoji-json') || id.includes('@mediapipe') || id.includes('web-noise-suppressor')) return undefined;
             if (id.includes('mediasoup-client')) return 'vendor-voice';
             if (id.includes('/react') || id.includes('redux') || id.includes('@reduxjs') || id.includes('scheduler')) return 'vendor-react';
             return 'vendor';
