@@ -140,3 +140,5 @@ backups/
 .eslintcache
 designden gelen/
 .sidcord-state.md
+apps/mobile/dist/
+apps/mobile/.expo/
