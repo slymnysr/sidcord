@@ -1,5 +1,6 @@
 # Sidcord masaüstü paketleri — Windows (.msi/.exe) + Linux (.deb/.AppImage)
-# Manuel tetiklenir (workflow_dispatch) veya v* tag'i push'lanınca çalışır.
+# v* tag'inde: GitHub Release oluşturur, imzalı paketleri + oto-güncelleme latest.json'unu yükler.
+# Manuel tetiklemede (workflow_dispatch): yalnızca build + artifact (release yok).
 name: Desktop Build
 
 on:
@@ -18,6 +19,8 @@ jobs:
           - platform: ubuntu-22.04
             args: ''
     runs-on: ${{ matrix.platform }}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -44,10 +47,19 @@ jobs:
       - name: Bağımlılıkları kur
         run: pnpm install --frozen-lockfile
 
-      - name: Tauri build
+      - name: Tauri build (+ tag'de release)
         uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
           projectPath: apps/desktop
+          # Tag push'unda release oluştur + asset'leri ve latest.json'u yükle
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: ${{ startsWith(github.ref, 'refs/tags/') && format('Sidcord {0}', github.ref_name) || '' }}
+          releaseDraft: false
+          includeUpdaterJson: true
           args: ${{ matrix.args }}
 
       - name: Paketleri yükle (artifact)

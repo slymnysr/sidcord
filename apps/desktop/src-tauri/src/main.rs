@@ -86,6 +86,51 @@ fn game_watcher(app: tauri::AppHandle) {
     }
 }
 
+/// Açılıştan kısa süre sonra sessizce güncelleme denetler; varsa indirir-kurar ve
+/// kullanıcıya yeniden başlatmayı sorar. Hata durumunda yalnızca log düşer.
+fn spawn_update_check(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(10));
+        tauri::async_runtime::block_on(async move {
+            use tauri_plugin_updater::UpdaterExt;
+            let updater = match app.updater() {
+                Ok(u) => u,
+                Err(e) => {
+                    eprintln!("[guncelleme] updater kurulamadı: {e}");
+                    return;
+                }
+            };
+            match updater.check().await {
+                Ok(Some(update)) => {
+                    eprintln!("[guncelleme] yeni sürüm: {}", update.version);
+                    if let Err(e) = update.download_and_install(|_, _| {}, || {}).await {
+                        eprintln!("[guncelleme] kurulamadı: {e}");
+                        return;
+                    }
+                    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+                    let restart = app
+                        .dialog()
+                        .message(format!(
+                            "Sidcord {} indirildi ve kuruldu.\nŞimdi yeniden başlatılsın mı?",
+                            update.version
+                        ))
+                        .title("Güncelleme hazır")
+                        .buttons(MessageDialogButtons::OkCancelCustom(
+                            "Yeniden Başlat".into(),
+                            "Sonra".into(),
+                        ))
+                        .blocking_show();
+                    if restart {
+                        app.restart();
+                    }
+                }
+                Ok(None) => eprintln!("[guncelleme] uygulama güncel"),
+                Err(e) => eprintln!("[guncelleme] kontrol hatası: {e}"),
+            }
+        });
+    });
+}
+
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -97,6 +142,8 @@ fn show_main_window(app: &tauri::AppHandle) {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .plugin(
@@ -187,6 +234,9 @@ fn main() {
             // Oyun algılama (otomatik "Oynuyor" durumu)
             let handle = app.handle().clone();
             std::thread::spawn(move || game_watcher(handle));
+
+            // Oto-güncelleme denetimi (GitHub Releases latest.json)
+            spawn_update_check(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {

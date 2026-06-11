@@ -1,6 +1,6 @@
 [package]
 name = "sidcord-desktop"
-version = "0.1.0"
+version = "0.1.1"
 description = "Sidcord masaüstü uygulaması"
 edition = "2021"
 
@@ -15,6 +15,8 @@ tauri-plugin-window-state = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-dialog = "2"
 sysinfo = "0.33"
 
 # Linux webview'ında WebRTC varsayılan kapalı — sesli sohbet için runtime'da açıyoruz
