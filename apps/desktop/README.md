@@ -39,6 +39,11 @@ bkz. `apps/web/src/serverConfig.ts`).
 
 ## Bilinen notlar
 
+- **Linux'ta sesli/görüntülü sohbet çalışmaz** (Ubuntu dahil çoğu dağıtım): sistem `libwebkit2gtk`
+  paketi WebRTC olmadan derlenir (`ENABLE_WEB_RTC=OFF`) — `RTCPeerConnection` motorda yoktur,
+  runtime ayarıyla açılamaz (PyGObject ile doğrulandı: enable-webrtc açıkken bile `undefined`).
+  Metin/medya tarafı tam çalışır. **Windows'ta sorun yok** — WebView2 Chromium tabanlıdır,
+  ses/video tam desteklidir. Linux'ta ses için tarayıcı kullanın.
 - WSLg'de tepsi ikonu Windows bildirim alanında görünmeyebilir (WSLg sınırı); gerçek Windows paketinde sorun yok.
 - Oto-güncelleme (tauri-plugin-updater) bilinçli olarak sonraya bırakıldı: imzalama anahtarı + release endpoint'i gerektirir, CI release akışıyla birlikte kurulacak.
 - Gerçek PTT (basılı tutma) global kısayolu plugin keyup vermediği için yapılmadı; toggle-mute var.

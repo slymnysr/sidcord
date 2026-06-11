@@ -205,9 +205,15 @@ class VoiceClient {
   }
 
   async connect(channelId: string) {
-    // Eski/kısıtlı webview'larda (WebRTC kapalı webkit derlemeleri) anlamlı hata ver
+    // Kısıtlı webview'larda anlamlı hata: Linux dağıtım webkit'leri çoğunlukla
+    // WebRTC'siz derlenir (motor yok — ayarla açılamaz). Windows WebView2 tam destekler.
     if (typeof RTCPeerConnection === 'undefined') {
-      throw new Error('Bu pencerede WebRTC desteği yok — sesli sohbet için uygulamayı güncelle veya tarayıcıdan katıl');
+      const isDesktop = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+      throw new Error(
+        isDesktop
+          ? 'Linux masaüstü sürümünde sistem webview\'ı WebRTC içermiyor — sesli sohbet için Windows uygulamasını veya tarayıcıyı kullan (http://localhost:3000)'
+          : 'Bu tarayıcı WebRTC desteklemiyor — güncel Chrome/Firefox/Edge ile katıl',
+      );
     }
     const token = tokenStore.access();
     if (!token) throw new Error('no token');
