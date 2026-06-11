@@ -1,11 +1,13 @@
-// Sohbet ekranı — gerçek zamanlı mesajlar (Phoenix WS) + gönderme + eskiyi yükleme.
+// Sohbet ekranı — gerçek zamanlı mesajlar (Phoenix WS), tepkiler, yanıtlar,
+// uzun-basma menüsü (tepki/yanıtla/kopyala/sil), eskiyi yükleme.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, FlatList, TextInput, TouchableOpacity, StyleSheet,
-  KeyboardAvoidingView, Platform, Image,
+  KeyboardAvoidingView, Platform, Image, Modal, Pressable, Alert,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { colors } from '../theme';
-import { api, type Message, type User } from '../api';
+import { api, type Message, type Reaction, type User } from '../api';
 import { joinGuild, sendTyping } from '../gateway';
 
 interface Props {
@@ -14,13 +16,20 @@ interface Props {
   onBack: () => void;
 }
 
+const QUICK_EMOJIS = ['👍', '❤️', '😂', '🔥', '👀', '🎉'];
+
 export function ChatScreen({ channel, me, onBack }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
+  const [reactions, setReactions] = useState<Record<string, Reaction[]>>({});
   const [text, setText] = useState('');
   const [users, setUsers] = useState<Record<string, User>>({ [me.id]: me });
   const [sending, setSending] = useState(false);
+  const [menuFor, setMenuFor] = useState<Message | null>(null);
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
   const usersRef = useRef(users);
   usersRef.current = users;
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
 
   const resolveUser = useCallback((id: string) => {
     if (usersRef.current[id]) return;
@@ -28,15 +37,23 @@ export function ChatScreen({ channel, me, onBack }: Props) {
     api.user(id).then((u) => setUsers((prev) => ({ ...prev, [id]: u }))).catch(() => {});
   }, []);
 
-  // İlk yükleme (en yeni 50, ters çevir: en eski üstte)
+  // İlk yükleme (en yeni 50; en eski üstte) + son 30 mesajın tepkileri
   useEffect(() => {
     let cancelled = false;
     api.messages(channel.id)
-      .then((list) => {
+      .then(async (list) => {
         if (cancelled) return;
         const ordered = list.slice().reverse();
         setMessages(ordered);
         for (const m of ordered) resolveUser(m.author_id);
+        const tail = ordered.slice(-30);
+        const results = await Promise.all(
+          tail.map((m) => api.reactions.list(m.id).then((r) => [m.id, r] as const).catch(() => null)),
+        );
+        if (cancelled) return;
+        const map: Record<string, Reaction[]> = {};
+        for (const r of results) if (r && r[1].length > 0) map[r[0]] = r[1];
+        setReactions((prev) => ({ ...map, ...prev }));
       })
       .catch(() => {});
     api.ack(channel.id).catch(() => {});
@@ -45,7 +62,25 @@ export function ChatScreen({ channel, me, onBack }: Props) {
     };
   }, [channel.id, resolveUser]);
 
-  // Gerçek zamanlı: guild kanalı eventleri (DM'lerde sunucu kanalı yok — polling fallback)
+  // Tepki sayacını yerel güncelle (canlı event + optimistic ortak yolu)
+  const bumpReaction = useCallback((messageId: string, emoji: string, delta: 1 | -1, byMe: boolean) => {
+    setReactions((prev) => {
+      const list = prev[messageId] ? [...prev[messageId]] : [];
+      const idx = list.findIndex((r) => r.emoji === emoji);
+      if (idx >= 0) {
+        const r = { ...list[idx] };
+        r.count += delta;
+        if (byMe) r.me = delta > 0;
+        if (r.count <= 0) list.splice(idx, 1);
+        else list[idx] = r;
+      } else if (delta > 0) {
+        list.push({ emoji, count: 1, me: byMe });
+      }
+      return { ...prev, [messageId]: list };
+    });
+  }, []);
+
+  // Gerçek zamanlı: guild eventleri (DM'de polling fallback)
   useEffect(() => {
     if (!channel.guildId) {
       const t = setInterval(() => {
@@ -54,6 +89,14 @@ export function ChatScreen({ channel, me, onBack }: Props) {
       return () => clearInterval(t);
     }
     joinGuild(channel.guildId, (ev, payload) => {
+      if (ev === 'REACTION_ADD' || ev === 'REACTION_REMOVE') {
+        if (payload?.channel_id !== channel.id) return;
+        const mine = String(payload.user_id) === me.id;
+        // Kendi tepkim optimistic işlendi — event'te tekrar sayma
+        if (mine) return;
+        bumpReaction(String(payload.message_id), payload.emoji, ev === 'REACTION_ADD' ? 1 : -1, false);
+        return;
+      }
       const msg: Message | undefined = payload?.message;
       if (!msg || msg.channel_id !== channel.id) return;
       if (ev === 'MESSAGE_CREATE') {
@@ -65,24 +108,56 @@ export function ChatScreen({ channel, me, onBack }: Props) {
         setMessages((prev) => prev.filter((m) => m.id !== msg.id));
       }
     });
-  }, [channel.id, channel.guildId, resolveUser]);
+  }, [channel.id, channel.guildId, me.id, resolveUser, bumpReaction]);
 
   async function send() {
     const content = text.trim();
     if (!content || sending) return;
     setSending(true);
     setText('');
+    const reply = replyTo;
+    setReplyTo(null);
     try {
-      const m = await api.sendMessage(channel.id, content);
+      const m = await api.sendMessage(channel.id, content, reply?.id);
       setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m]));
-    } catch (e: any) {
-      setText(content); // başarısızsa geri koy
+    } catch {
+      setText(content);
+      setReplyTo(reply);
     } finally {
       setSending(false);
     }
   }
 
+  async function toggleReaction(msg: Message, emoji: string) {
+    const cur = reactions[msg.id]?.find((r) => r.emoji === emoji);
+    const adding = !cur?.me;
+    bumpReaction(msg.id, emoji, adding ? 1 : -1, true);
+    try {
+      if (adding) await api.reactions.add(msg.id, emoji);
+      else await api.reactions.remove(msg.id, emoji);
+    } catch {
+      bumpReaction(msg.id, emoji, adding ? -1 : 1, true); // geri al
+    }
+  }
+
+  function deleteMessage(msg: Message) {
+    Alert.alert('Mesajı sil', 'Bu mesaj kalıcı olarak silinecek.', [
+      { text: 'Vazgeç', style: 'cancel' },
+      {
+        text: 'Sil',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await api.deleteMessage(msg.id);
+            setMessages((prev) => prev.filter((m) => m.id !== msg.id));
+          } catch {}
+        },
+      },
+    ]);
+  }
+
   const listRef = useRef<FlatList>(null);
+  const findMessage = (id?: string) => (id ? messagesRef.current.find((m) => m.id === id) : undefined);
 
   return (
     <KeyboardAvoidingView
@@ -110,45 +185,81 @@ export function ChatScreen({ channel, me, onBack }: Props) {
           }
           const prev = messages[index - 1];
           const grouped =
-            !!prev && !prev.system && prev.author_id === item.author_id &&
+            !!prev && !prev.system && prev.author_id === item.author_id && !item.replied_to_id &&
             new Date(item.created_at).getTime() - new Date(prev.created_at).getTime() < 5 * 60 * 1000;
           const author = users[item.author_id];
           const name = item.webhook_username || author?.display_name || '…';
+          const replied = findMessage(item.replied_to_id);
+          const msgReactions = reactions[item.id] ?? [];
           return (
-            <View style={[s.msgRow, grouped && s.msgRowGrouped]}>
-              {grouped ? (
-                <View style={s.avatarSpacer} />
-              ) : (
-                <View style={[s.avatar, { backgroundColor: author?.avatar_color || colors.surface3 }]}>
-                  {author?.avatar_url ? (
-                    <Image source={{ uri: author.avatar_url }} style={s.avatarImg} />
-                  ) : (
-                    <Text style={s.avatarText}>{name.slice(0, 1).toUpperCase()}</Text>
-                  )}
+            <Pressable onLongPress={() => setMenuFor(item)} delayLongPress={250}>
+              {item.replied_to_id && (
+                <View style={s.replyPreviewRow}>
+                  <Text style={s.replyPreviewText} numberOfLines={1}>
+                    ↪ {replied ? `${users[replied.author_id]?.display_name ?? '…'}: ${replied.content}` : 'bir mesaja yanıt'}
+                  </Text>
                 </View>
               )}
-              <View style={s.msgBody}>
-                {!grouped && (
-                  <View style={s.msgHead}>
-                    <Text style={s.msgAuthor}>{name}</Text>
-                    <Text style={s.msgTime}>
-                      {new Date(item.created_at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
-                    </Text>
+              <View style={[s.msgRow, grouped && s.msgRowGrouped]}>
+                {grouped ? (
+                  <View style={s.avatarSpacer} />
+                ) : (
+                  <View style={[s.avatar, { backgroundColor: author?.avatar_color || colors.surface3 }]}>
+                    {author?.avatar_url ? (
+                      <Image source={{ uri: author.avatar_url }} style={s.avatarImg} />
+                    ) : (
+                      <Text style={s.avatarText}>{name.slice(0, 1).toUpperCase()}</Text>
+                    )}
                   </View>
                 )}
-                {!!item.content && <Text style={s.msgText}>{item.content}</Text>}
-                {item.attachments?.map((a: NonNullable<Message['attachments']>[number]) =>
-                  (a.content_type ?? '').startsWith('image/') ? (
-                    <Image key={a.id} source={{ uri: a.url }} style={s.attachment} resizeMode="cover" />
-                  ) : (
-                    <Text key={a.id} style={s.file}>📎 {a.filename}</Text>
-                  ),
-                )}
+                <View style={s.msgBody}>
+                  {!grouped && (
+                    <View style={s.msgHead}>
+                      <Text style={s.msgAuthor}>{name}</Text>
+                      <Text style={s.msgTime}>
+                        {new Date(item.created_at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                      </Text>
+                    </View>
+                  )}
+                  {!!item.content && <Text style={s.msgText}>{item.content}</Text>}
+                  {item.attachments?.map((a: NonNullable<Message['attachments']>[number]) =>
+                    (a.content_type ?? '').startsWith('image/') ? (
+                      <Image key={a.id} source={{ uri: a.url }} style={s.attachment} resizeMode="cover" />
+                    ) : (
+                      <Text key={a.id} style={s.file}>📎 {a.filename}</Text>
+                    ),
+                  )}
+                  {msgReactions.length > 0 && (
+                    <View style={s.reactionRow}>
+                      {msgReactions.map((r) => (
+                        <TouchableOpacity
+                          key={r.emoji}
+                          style={[s.reactionChip, r.me && s.reactionChipMine]}
+                          onPress={() => toggleReaction(item, r.emoji)}
+                        >
+                          <Text style={s.reactionEmoji}>{r.emoji}</Text>
+                          <Text style={[s.reactionCount, r.me && { color: colors.brand }]}>{r.count}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
+                </View>
               </View>
-            </View>
+            </Pressable>
           );
         }}
       />
+
+      {replyTo && (
+        <View style={s.replyBar}>
+          <Text style={s.replyBarText} numberOfLines={1}>
+            ↪ {users[replyTo.author_id]?.display_name ?? '…'} kullanıcısına yanıt
+          </Text>
+          <TouchableOpacity onPress={() => setReplyTo(null)}>
+            <Text style={s.replyBarClose}>✕</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <View style={s.inputRow}>
         <TextInput
@@ -166,6 +277,58 @@ export function ChatScreen({ channel, me, onBack }: Props) {
           <Text style={s.sendText}>➤</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Uzun-basma menüsü */}
+      <Modal visible={!!menuFor} transparent animationType="fade" onRequestClose={() => setMenuFor(null)}>
+        <Pressable style={s.sheetBackdrop} onPress={() => setMenuFor(null)}>
+          <Pressable style={s.sheet} onPress={() => {}}>
+            <View style={s.quickRow}>
+              {QUICK_EMOJIS.map((e) => (
+                <TouchableOpacity
+                  key={e}
+                  style={s.quickEmoji}
+                  onPress={() => {
+                    if (menuFor) toggleReaction(menuFor, e);
+                    setMenuFor(null);
+                  }}
+                >
+                  <Text style={{ fontSize: 26 }}>{e}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity
+              style={s.sheetItem}
+              onPress={() => {
+                setReplyTo(menuFor);
+                setMenuFor(null);
+              }}
+            >
+              <Text style={s.sheetItemText}>↩️  Yanıtla</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={s.sheetItem}
+              onPress={async () => {
+                if (menuFor?.content) await Clipboard.setStringAsync(menuFor.content);
+                setMenuFor(null);
+              }}
+            >
+              <Text style={s.sheetItemText}>📋  Metni Kopyala</Text>
+            </TouchableOpacity>
+            {menuFor?.author_id === me.id && (
+              <TouchableOpacity
+                style={s.sheetItem}
+                onPress={() => {
+                  const m = menuFor;
+                  setMenuFor(null);
+                  if (m) deleteMessage(m);
+                }}
+              >
+                <Text style={[s.sheetItemText, { color: colors.accent }]}>🗑️  Mesajı Sil</Text>
+              </TouchableOpacity>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -191,6 +354,22 @@ const s = StyleSheet.create({
   msgText: { color: colors.ink, fontSize: 15, lineHeight: 21, marginTop: 1 },
   attachment: { width: 220, height: 150, borderRadius: 10, marginTop: 6, backgroundColor: colors.surface2 },
   file: { color: colors.brand, marginTop: 4 },
+  replyPreviewRow: { paddingLeft: 60, paddingRight: 12, marginTop: 10 },
+  replyPreviewText: { color: colors.inkTertiary, fontSize: 12 },
+  reactionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 },
+  reactionChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.surface2,
+    borderRadius: 12, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: colors.line,
+  },
+  reactionChipMine: { borderColor: colors.brand, backgroundColor: colors.brand + '22' },
+  reactionEmoji: { fontSize: 14 },
+  reactionCount: { color: colors.inkSecondary, fontSize: 12, fontWeight: '700' },
+  replyBar: {
+    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8,
+    backgroundColor: colors.surface1, borderTopWidth: 1, borderColor: colors.line, gap: 8,
+  },
+  replyBarText: { color: colors.inkSecondary, flex: 1, fontSize: 13 },
+  replyBarClose: { color: colors.inkTertiary, fontSize: 16, padding: 4 },
   inputRow: { flexDirection: 'row', alignItems: 'flex-end', padding: 10, gap: 8, borderTopWidth: 1, borderColor: colors.line },
   input: {
     flex: 1, backgroundColor: colors.surface2, borderRadius: 22, paddingHorizontal: 16,
@@ -198,4 +377,13 @@ const s = StyleSheet.create({
   },
   sendBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.brand, alignItems: 'center', justifyContent: 'center' },
   sendText: { color: '#06281F', fontSize: 18, fontWeight: '800' },
+  sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  sheet: {
+    backgroundColor: colors.surface1, borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    padding: 16, paddingBottom: 28, gap: 4,
+  },
+  quickRow: { flexDirection: 'row', justifyContent: 'space-around', paddingBottom: 12, borderBottomWidth: 1, borderColor: colors.line, marginBottom: 8 },
+  quickEmoji: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.surface2, alignItems: 'center', justifyContent: 'center' },
+  sheetItem: { paddingVertical: 13, paddingHorizontal: 8 },
+  sheetItemText: { color: colors.ink, fontSize: 16, fontWeight: '600' },
 });

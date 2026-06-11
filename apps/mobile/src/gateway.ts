@@ -28,7 +28,7 @@ export function joinGuild(guildId: string, onEvent: (event: string, payload: any
   const existing = guildChannels.get(guildId);
   if (existing) return existing;
   const ch = s.channel(`guild:${guildId}`, {});
-  for (const ev of ['MESSAGE_CREATE', 'MESSAGE_UPDATE', 'MESSAGE_DELETE', 'TYPING_START']) {
+  for (const ev of ['MESSAGE_CREATE', 'MESSAGE_UPDATE', 'MESSAGE_DELETE', 'TYPING_START', 'REACTION_ADD', 'REACTION_REMOVE']) {
     ch.on(ev, (payload: any) => onEvent(ev, payload));
   }
   ch.join();

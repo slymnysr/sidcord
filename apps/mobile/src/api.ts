@@ -103,8 +103,14 @@ export interface Message {
   content: string;
   created_at: string;
   system?: boolean;
+  replied_to_id?: string;
   webhook_username?: string;
   attachments?: { id: string; url: string; filename: string; content_type?: string }[];
+}
+export interface Reaction {
+  emoji: string;
+  count: number;
+  me: boolean;
 }
 export interface DMChannel {
   id: string;
@@ -141,11 +147,20 @@ export const api = {
     request<Message[]>(
       `/channels/${channelId}/messages?limit=50` + (before ? `&before=${before}` : ''),
     ),
-  sendMessage: (channelId: string, content: string) =>
+  sendMessage: (channelId: string, content: string, repliedToId?: string) =>
     request<Message>(`/channels/${channelId}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, replied_to_id: repliedToId || undefined }),
     }),
+  deleteMessage: (messageId: string) =>
+    request<void>(`/messages/${messageId}`, { method: 'DELETE' }),
+  reactions: {
+    list: (messageId: string) => request<Reaction[]>(`/messages/${messageId}/reactions`),
+    add: (messageId: string, emoji: string) =>
+      request<void>(`/messages/${messageId}/reactions/${encodeURIComponent(emoji)}`, { method: 'PUT' }),
+    remove: (messageId: string, emoji: string) =>
+      request<void>(`/messages/${messageId}/reactions/${encodeURIComponent(emoji)}`, { method: 'DELETE' }),
+  },
   dms: () => request<DMChannel[]>('/users/me/channels'),
   ack: (channelId: string) =>
     request<void>(`/channels/${channelId}/ack`, { method: 'POST', body: '{}' }),
