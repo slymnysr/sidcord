@@ -153,6 +153,29 @@ fn main() {
                 })
                 .build(app)?;
 
+            // Linux (webkit2gtk): WebRTC + getUserMedia varsayılan KAPALI gelir —
+            // sesli/görüntülü sohbet için aç ve mikrofon/kamera izin isteklerini onayla.
+            // (Windows WebView2'de gerek yok; orada Chromium davranışı geçerli.)
+            #[cfg(target_os = "linux")]
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.with_webview(|webview| {
+                    use webkit2gtk::glib::object::Cast;
+                    use webkit2gtk::{PermissionRequestExt, SettingsExt, UserMediaPermissionRequest, WebViewExt};
+                    let wv = webview.inner();
+                    if let Some(settings) = WebViewExt::settings(&wv) {
+                        settings.set_enable_webrtc(true);
+                        settings.set_enable_media_stream(true);
+                    }
+                    wv.connect_permission_request(|_, request| {
+                        if request.downcast_ref::<UserMediaPermissionRequest>().is_some() {
+                            request.allow();
+                            return true;
+                        }
+                        false
+                    });
+                });
+            }
+
             // Global susturma kısayolu — başka uygulama kapmışsa uygulamayı DÜŞÜRME, sadece logla
             {
                 use tauri_plugin_global_shortcut::GlobalShortcutExt;

@@ -188,6 +188,8 @@ const channelsSlice = createSlice({
 interface MessagesState {
   byChannel: Record<string, APIMessage[]>;
   loading: boolean;
+  // İlk yüklemesi süren kanal (cache boşken iskelet göstermek için)
+  loadingChannel: string | null;
 }
 
 export const fetchMessages = createAsyncThunk(
@@ -207,7 +209,7 @@ export const sendMessageThunk = createAsyncThunk(
 
 const messagesSlice = createSlice({
   name: 'messages',
-  initialState: { byChannel: {}, loading: false } as MessagesState,
+  initialState: { byChannel: {}, loading: false, loadingChannel: null } as MessagesState,
   reducers: {
     pushMessage(state, action: PayloadAction<APIMessage>) {
       const list = state.byChannel[action.payload.channel_id] ?? [];
@@ -234,8 +236,15 @@ const messagesSlice = createSlice({
     },
   },
   extraReducers: (b) => {
-    b.addCase(fetchMessages.fulfilled, (s, a) => {
+    b.addCase(fetchMessages.pending, (s, a) => {
+      s.loadingChannel = a.meta.arg;
+    })
+    .addCase(fetchMessages.rejected, (s, a) => {
+      if (s.loadingChannel === a.meta.arg) s.loadingChannel = null;
+    })
+    .addCase(fetchMessages.fulfilled, (s, a) => {
       s.byChannel[a.payload.channelId] = a.payload.list;
+      if (s.loadingChannel === a.payload.channelId) s.loadingChannel = null;
     })
      .addCase(sendMessageThunk.fulfilled, (s, a) => {
        const list = s.byChannel[a.payload.channel_id] ?? [];

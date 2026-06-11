@@ -3191,6 +3191,7 @@ dependencies = [
  "tauri-plugin-global-shortcut",
  "tauri-plugin-opener",
  "tauri-plugin-window-state",
+ "webkit2gtk",
 ]
 
 [[package]]

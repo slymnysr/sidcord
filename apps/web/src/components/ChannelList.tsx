@@ -1156,7 +1156,7 @@ function UserPanel() {
         />
       </button>
       {menuOpen && (
-        <div className="absolute bottom-14 left-3 bg-surface-1 border border-line rounded-xl shadow-2xl p-1 z-30 w-44">
+        <div className="anim-pop-in absolute bottom-14 left-3 bg-surface-1 border border-line rounded-xl shadow-2xl p-1 z-30 w-44">
           {(['online', 'idle', 'dnd', 'offline'] as const).map((s) => (
             <button
               key={s}

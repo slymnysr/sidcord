@@ -1,90 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import { api } from '../api';
 import { useAppSelector } from '../store';
-
-// Discord paritesi: kategorilere ayrılmış emoji seti
-const EMOJI_CATEGORIES: { name: string; emojis: string[] }[] = [
-  {
-    name: 'Sık Kullanılan',
-    emojis: ['👍', '❤️', '😂', '🎉', '😮', '😢', '🔥', '👀', '💯', '🙏', '✨', '👏'],
-  },
-  {
-    name: 'İfadeler',
-    emojis: [
-      '😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😇',
-      '🥰','😍','🤩','😘','😗','😚','😙','😋','😛','😜','🤪','😝','🤑',
-      '🤗','🤭','🤫','🤔','🤐','🤨','😐','😑','😶','😏','😒','🙄','😬',
-      '🤥','😌','😔','😪','🤤','😴','😷','🤒','🤕','🤢','🤮','🤧','🥵',
-      '🥶','🥴','😵','🤯','🤠','🥳','😎','🤓','🧐','😕','😟','🙁','☹️',
-      '😮','😯','😲','😳','🥺','😦','😧','😨','😰','😥','😢','😭','😱',
-      '😖','😣','😞','😓','😩','😫','🥱','😤','😡','😠','🤬','😈','👿',
-    ],
-  },
-  {
-    name: 'İnsan & Vücut',
-    emojis: [
-      '👋','🤚','🖐️','✋','🖖','👌','🤌','🤏','✌️','🤞','🤟','🤘','🤙',
-      '👈','👉','👆','🖕','👇','☝️','👍','👎','✊','👊','🤛','🤜','👏',
-      '🙌','👐','🤲','🤝','🙏','💪','🦵','🦶','👂','🦻','👃','🧠','🦷',
-      '🦴','👀','👁️','👅','👄','💋','🩸',
-    ],
-  },
-  {
-    name: 'Hayvan & Doğa',
-    emojis: [
-      '🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷',
-      '🐸','🐵','🐔','🐧','🐦','🐤','🦆','🦅','🦉','🦇','🐺','🐗','🐴',
-      '🦄','🐝','🐛','🦋','🐌','🐞','🐜','🦗','🕷️','🦂','🐢','🐍','🦎',
-      '🦖','🦕','🐙','🦑','🦐','🦞','🦀','🐡','🐠','🐟','🐬','🐳','🐋',
-      '🦈','🌳','🌲','🌴','🌵','🌷','🌻','🌹','🌸','💐','🍄','🌿','🍀',
-    ],
-  },
-  {
-    name: 'Yemek & İçecek',
-    emojis: [
-      '🍎','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🫐','🍈','🍒','🍑','🥭',
-      '🍍','🥥','🥝','🍅','🍆','🥑','🥦','🥬','🥒','🌶️','🌽','🥕','🧄',
-      '🧅','🥔','🍠','🥐','🍞','🥖','🧀','🥚','🍳','🧈','🥞','🧇','🥓',
-      '🥩','🍗','🍖','🌭','🍔','🍟','🍕','🥪','🌮','🌯','🥗','🍝','🍜',
-      '🍲','🥘','🍣','🍱','🍤','🍙','🍚','🍘','🍢','🍡','🍧','🍨','🍦',
-      '🥧','🍰','🎂','🍮','🍭','🍬','🍫','🍿','🍩','🍪','🌰','🥜','🍯',
-      '🥛','☕','🍵','🍶','🍺','🍷','🍸','🍹','🍾','🍴','🥄','🔪',
-    ],
-  },
-  {
-    name: 'Aktiviteler',
-    emojis: [
-      '⚽','🏀','🏈','⚾','🥎','🎾','🏐','🏉','🥏','🎱','🪀','🏓','🏸',
-      '🏒','🏑','🥍','🏏','🥅','⛳','🪁','🏹','🎣','🥊','🥋','🎽','🛹',
-      '🛼','🛷','⛸️','🥌','🎿','⛷️','🏂','🪂','🏋️','🤼','🤸','⛹️','🤺',
-      '🤾','🏌️','🏇','🧘','🏄','🏊','🤽','🚣','🧗','🚵','🚴','🏆','🥇',
-      '🥈','🥉','🏅','🎖️','🏵️','🎗️','🎫','🎟️','🎪','🤹','🎭','🩰','🎨',
-      '🎬','🎤','🎧','🎼','🎹','🥁','🎷','🎺','🎸','🪕','🎻','🎲','♟️',
-      '🎯','🎳','🎮','🎰','🧩',
-    ],
-  },
-  {
-    name: 'Nesneler',
-    emojis: [
-      '💎','🔔','🔕','💯','🆗','✅','❌','⭕','⛔','🚫','🆘','🚷','🔞',
-      '⚠️','📛','🆕','🆙','🆒','🆓','🆗','🆘','🅰️','🅱️','🆎','🅾️','🆑',
-      '💸','💰','💵','💴','💶','💷','💳','💎','⚖️','🔧','🔨','⚒️','🛠️',
-      '⛏️','🔩','⚙️','⛓️','🔫','💣','🔪','🗡️','⚔️','🛡️','🚬','⚰️','⚱️',
-      '🏺','🔮','📿','💈','⚗️','🔭','🔬','🕳️','💊','💉','🩹','🩺','🚪',
-    ],
-  },
-  {
-    name: 'Semboller',
-    emojis: [
-      '❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞',
-      '💓','💗','💖','💘','💝','💟','☮️','✝️','☪️','🕉️','☸️','✡️','🔯',
-      '🕎','☯️','☦️','🛐','⚛️','♈','♉','♊','♋','♌','♍','♎','♏','♐',
-      '♑','♒','♓','⛎','🆔','♻️','⚜️','🔱','📛','🔰','⭕','✅','☑️','✔️',
-      '❌','❎','➕','➖','➗','✖️','♾️','💲','💱','™️','©️','®️','〰️',
-    ],
-  },
-];
+import { loadEmojiGroups, type EmojiGroup } from '../emojiData';
 
 // Unicode emoji isim/anahtar kelime araması için (Türkçe + İngilizce)
 const EMOJI_KEYWORDS: Record<string, string[]> = {
@@ -149,11 +67,6 @@ const EMOJI_KEYWORDS: Record<string, string[]> = {
 // Ten rengi değiştiriciler (U+1F3FB..U+1F3FF) + ten rengi destekleyen emoji'ler
 const SKIN_TONES = ['', '\u{1F3FB}', '\u{1F3FC}', '\u{1F3FD}', '\u{1F3FE}', '\u{1F3FF}'];
 const TONE_SWATCH = ['✋', '🏻', '🏼', '🏽', '🏾', '🏿'];
-const SKIN_TONEABLE = new Set([
-  '👍','👎','👏','🙏','👋','🤚','🖐️','✋','🖖','👌','🤌','🤏','✌️','🤞','🤟','🤘','🤙',
-  '👈','👉','👆','🖕','👇','☝️','✊','👊','🤛','🤜','🙌','👐','🤲','🤝','💪','🦵','🦶',
-  '👂','🦻','👃','🤳','💅','👶','🧒','👦','👧','🧑','👨','👩','🧓','👴','👵','🙆','🙅',
-]);
 
 interface Props {
   onPick: (emoji: string) => void;
@@ -183,8 +96,27 @@ export function EmojiPicker({ onPick, onClose }: Props) {
 
   const [tone, setTone] = useState<number>(() => parseInt(localStorage.getItem('sidcord_skin_tone') || '0', 10));
 
+  // Tam Unicode seti (1900+) — lazy: picker ilk açıldığında yüklenir, sonra cache'ten gelir
+  const [groups, setGroups] = useState<EmojiGroup[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    loadEmojiGroups()
+      .then((g) => !cancelled && setGroups(g))
+      .catch(() => !cancelled && setGroups([]));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Ten rengi destekleyen emojiler — elle liste yerine veri setinden
+  const skinSet = useMemo(() => {
+    const s = new Set<string>();
+    for (const g of groups ?? []) for (const x of g.emojis) if (x.s) s.add(x.e);
+    return s;
+  }, [groups]);
+
   function applyTone(emoji: string): string {
-    if (tone > 0 && SKIN_TONEABLE.has(emoji)) {
+    if (tone > 0 && skinSet.has(emoji)) {
       // Mevcut variation selector'ı (️) kaldırıp ten rengini ekle
       return emoji.replace('️', '') + SKIN_TONES[tone];
     }
@@ -225,31 +157,33 @@ export function EmojiPicker({ onPick, onClose }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const visibleCategories = q.trim()
-    ? (() => {
-        const needle = q.trim().toLowerCase();
-        // Tüm kategori emojilerini düzleştir, anahtar kelimeye göre filtrele
-        const all = EMOJI_CATEGORIES.flatMap((c) => c.emojis);
-        const seen = new Set<string>();
-        const matches = all.filter((e) => {
-          if (seen.has(e)) return false;
-          const kws = EMOJI_KEYWORDS[e];
-          if (kws && kws.some((k) => k.includes(needle))) {
-            seen.add(e);
-            return true;
-          }
-          return false;
-        });
-        return matches.length > 0 ? [{ name: 'Arama Sonuçları', emojis: matches }] : [];
-      })()
-    : EMOJI_CATEGORIES;
+  // Arama: Türkçe anahtar kelimeler (popülerler) + İngilizce resmi ad (tüm 1900+ set)
+  const visibleCategories: EmojiGroup[] = useMemo(() => {
+    const all = groups ?? [];
+    const needle = q.trim().toLowerCase();
+    if (!needle) return all;
+    const matches: EmojiGroup['emojis'] = [];
+    const seen = new Set<string>();
+    outer: for (const g of all) {
+      for (const x of g.emojis) {
+        if (seen.has(x.e)) continue;
+        const kws = EMOJI_KEYWORDS[x.e];
+        if ((kws && kws.some((k) => k.includes(needle))) || x.n.includes(needle)) {
+          seen.add(x.e);
+          matches.push(x);
+          if (matches.length >= 240) break outer;
+        }
+      }
+    }
+    return matches.length > 0 ? [{ name: 'Arama Sonuçları', emojis: matches }] : [];
+  }, [groups, q]);
 
   const filteredCustom = q.trim()
     ? customEmojis.filter((e) => e.name.toLowerCase().includes(q.toLowerCase()))
     : customEmojis;
 
   return (
-    <div className="w-80 max-h-[400px] flex flex-col bg-surface-1 border border-line rounded-xl shadow-2xl overflow-hidden">
+    <div className="anim-pop-in w-80 max-h-[400px] flex flex-col bg-surface-1 border border-line rounded-xl shadow-2xl overflow-hidden">
       <div className="p-2 border-b border-line">
         <div className="relative">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-tertiary" />
@@ -337,21 +271,26 @@ export function EmojiPicker({ onPick, onClose }: Props) {
             </div>
           </div>
         )}
+        {groups === null && (
+          <div className="py-8 flex justify-center">
+            <div className="w-5 h-5 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" aria-label="Emojiler yükleniyor" />
+          </div>
+        )}
         {visibleCategories.map((cat) => (
           <div key={cat.name} className="mb-2">
             <div className="text-[10px] font-bold uppercase text-ink-tertiary tracking-wider px-1 mb-1 sticky top-0 bg-surface-1 py-0.5 z-10">
               {cat.name}
             </div>
             <div className="grid grid-cols-8 gap-0.5">
-              {cat.emojis.map((e) => (
+              {cat.emojis.map((x) => (
                 <button
-                  key={e}
-                  onClick={() => pick(e)}
-                  onContextMenu={(ev) => { ev.preventDefault(); toggleFav(e); }}
-                  title={favs.includes(e) ? 'Sağ tık: favorilerden çıkar' : 'Sağ tık: favorilere ekle'}
-                  className={'w-8 h-8 flex items-center justify-center rounded hover:bg-surface-2 text-lg ' + (favs.includes(e) ? 'ring-1 ring-brand-500/40' : '')}
+                  key={x.e}
+                  onClick={() => pick(x.e)}
+                  onContextMenu={(ev) => { ev.preventDefault(); toggleFav(x.e); }}
+                  title={x.n + (favs.includes(x.e) ? ' — sağ tık: favoriden çıkar' : ' — sağ tık: favorile')}
+                  className={'w-8 h-8 flex items-center justify-center rounded hover:bg-surface-2 text-lg ' + (favs.includes(x.e) ? 'ring-1 ring-brand-500/40' : '')}
                 >
-                  {e}
+                  {x.e}
                 </button>
               ))}
             </div>

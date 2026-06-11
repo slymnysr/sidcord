@@ -75,7 +75,7 @@ export function VoiceStatusBar() {
 
   return (
     <div className="bg-surface-2 border-t border-line px-3 py-2 flex items-center gap-2">
-      <span className="w-2 h-2 rounded-full bg-status-online shrink-0" />
+      <SignalBars />
       <div className="flex-1 min-w-0">
         <div className={'text-[12px] font-semibold flex items-center gap-1 ' + (srvMute || srvDeaf ? 'text-accent-500' : 'text-status-online')}>
           <Volume2 size={12} className="shrink-0" />
@@ -123,6 +123,42 @@ export function VoiceStatusBar() {
       >
         <PhoneOff size={14} />
       </button>
+    </div>
+  );
+}
+
+// Bağlantı kalitesi göstergesi — gerçek WebRTC RTT'sine göre 3 çubuk (Discord paritesi).
+// ≤80ms yeşil · ≤200ms sarı · üstü kırmızı; ölçüm yoksa gri.
+function SignalBars() {
+  const [rtt, setRtt] = useState<number | null>(voice.getRtt());
+  useEffect(() => {
+    const onRtt = ({ ms }: any) => setRtt(ms);
+    const onDisc = () => setRtt(null);
+    voice.on('rtt', onRtt);
+    voice.on('disconnected', onDisc);
+    return () => {
+      voice.off('rtt', onRtt);
+      voice.off('disconnected', onDisc);
+    };
+  }, []);
+
+  const color =
+    rtt === null ? 'bg-ink-tertiary/40' : rtt <= 80 ? 'bg-status-online' : rtt <= 200 ? 'bg-status-idle' : 'bg-status-dnd';
+  const active = rtt === null ? 0 : rtt <= 80 ? 3 : rtt <= 200 ? 2 : 1;
+
+  return (
+    <div
+      className="flex items-end gap-[2px] shrink-0"
+      title={rtt === null ? 'Bağlantı kalitesi ölçülüyor…' : `Gecikme: ${rtt} ms`}
+      aria-label={rtt === null ? 'Bağlantı kalitesi ölçülüyor' : `Gecikme ${rtt} milisaniye`}
+    >
+      {[4, 7, 10].map((h, i) => (
+        <span
+          key={i}
+          style={{ height: h }}
+          className={'w-[3px] rounded-sm ' + (i < active ? color : 'bg-ink-tertiary/25')}
+        />
+      ))}
     </div>
   );
 }

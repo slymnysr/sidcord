@@ -38,6 +38,9 @@ export function MessageList() {
         : null,
   );
   const rawList = useAppSelector((s) => (channelId ? s.messages.byChannel[channelId] ?? [] : []));
+  const initialLoading = useAppSelector(
+    (s) => !!channelId && s.messages.loadingChannel === channelId && !(s.messages.byChannel[channelId]?.length),
+  );
   const channelReadState = useAppSelector((s) => (channelId ? s.readStates.byChannel[channelId] : null));
   const ignoredUsers = useAppSelector((s) => s.ui.ignoredUsers);
   const list = ignoredUsers.length ? rawList.filter((m) => !ignoredUsers.includes(m.author_id)) : rawList;
@@ -178,6 +181,24 @@ export function MessageList() {
         >
           18 yaşından büyüğüm, devam et
         </button>
+      </div>
+    );
+  }
+
+  // İlk yükleme + cache boş → Discord tarzı iskelet; cache varsa anında eski liste görünür
+  if (initialLoading) {
+    return (
+      <div className="flex-1 overflow-hidden px-6 py-4" aria-label="Mesajlar yükleniyor" aria-busy="true">
+        {[72, 40, 88, 56, 64, 32, 80, 48].map((w, i) => (
+          <div key={i} className="flex gap-3 mb-6 animate-pulse" style={{ animationDelay: `${i * 80}ms` }}>
+            <div className="w-10 h-10 rounded-full bg-surface-2 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="h-3.5 rounded bg-surface-2 mb-2" style={{ width: `${90 + (i % 3) * 30}px` }} />
+              <div className="h-3 rounded bg-surface-2/70" style={{ width: `${w}%` }} />
+              {i % 3 === 0 && <div className="h-3 rounded bg-surface-2/70 mt-1.5" style={{ width: `${Math.max(20, w - 30)}%` }} />}
+            </div>
+          </div>
+        ))}
       </div>
     );
   }
@@ -848,7 +869,7 @@ function MessageItem({
               left: Math.min(ctx.x, window.innerWidth - 230),
               top: Math.min(ctx.y, window.innerHeight - 360),
             }}
-            className="absolute w-56 bg-surface-1 border border-line rounded-xl shadow-2xl p-1 ring-1 ring-white/5 text-sm"
+            className="anim-pop-in absolute w-56 bg-surface-1 border border-line rounded-xl shadow-2xl p-1 ring-1 ring-white/5 text-sm"
           >
             {remindMode ? (
               <>

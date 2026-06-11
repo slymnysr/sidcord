@@ -205,6 +205,10 @@ class VoiceClient {
   }
 
   async connect(channelId: string) {
+    // Eski/kısıtlı webview'larda (WebRTC kapalı webkit derlemeleri) anlamlı hata ver
+    if (typeof RTCPeerConnection === 'undefined') {
+      throw new Error('Bu pencerede WebRTC desteği yok — sesli sohbet için uygulamayı güncelle veya tarayıcıdan katıl');
+    }
     const token = tokenStore.access();
     if (!token) throw new Error('no token');
     if (this.ws) await this.disconnect();
@@ -363,6 +367,7 @@ class VoiceClient {
         window.removeEventListener('keyup', up);
       };
     }
+    this.startRttMonitor();
     this.emit('connected', { channelId });
   }
 
@@ -657,6 +662,42 @@ class VoiceClient {
     this.setMicrophoneEnabled(!this.micEnabled);
   }
 
+  // === Bağlantı kalitesi (RTT) — VoiceStatusBar'daki sinyal çubukları için ===
+  private rttMs: number | null = null;
+  private rttTimer: number | null = null;
+
+  getRtt(): number | null {
+    return this.rttMs;
+  }
+
+  private startRttMonitor() {
+    this.stopRttMonitor();
+    this.rttTimer = window.setInterval(async () => {
+      try {
+        const stats = await this.sendTransport?.getStats();
+        if (!stats) return;
+        let rtt: number | undefined;
+        stats.forEach((s: any) => {
+          if (s.type === 'candidate-pair' && (s.nominated || s.selected) && typeof s.currentRoundTripTime === 'number') {
+            rtt = s.currentRoundTripTime;
+          }
+        });
+        if (rtt !== undefined) {
+          this.rttMs = Math.round(rtt * 1000);
+          this.emit('rtt', { ms: this.rttMs });
+        }
+      } catch { /* stats alınamadı — bir sonraki turda tekrar */ }
+    }, 3000);
+  }
+
+  private stopRttMonitor() {
+    if (this.rttTimer !== null) {
+      window.clearInterval(this.rttTimer);
+      this.rttTimer = null;
+    }
+    this.rttMs = null;
+  }
+
   private deafened = false;
 
   // Deafen: tüm remote audio'ları sustur + mikrofonu da kapat (Discord davranışı)
@@ -684,6 +725,7 @@ class VoiceClient {
   }
 
   async disconnect() {
+    this.stopRttMonitor();
     this.stopSpeakingAnalyzer('__self__');
     this.micEffect?.stop();
     this.micEffect = null;

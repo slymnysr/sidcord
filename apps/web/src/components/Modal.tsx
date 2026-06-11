@@ -48,7 +48,7 @@ export function Modal() {
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 max-md:p-0"
+      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 max-md:p-0 anim-fade-in"
       onClick={() => dispatch(closeModal())}
     >
       <div
@@ -56,7 +56,7 @@ export function Modal() {
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}
         className={
-          'bg-surface-1 border border-line rounded-2xl shadow-2xl relative ring-1 ring-white/5 max-md:w-full max-md:h-full max-md:max-w-none max-md:rounded-none max-md:border-0 max-md:overflow-y-auto ' +
+          'anim-modal-in bg-surface-1 border border-line rounded-2xl shadow-2xl relative ring-1 ring-white/5 max-md:w-full max-md:h-full max-md:max-w-none max-md:rounded-none max-md:border-0 max-md:overflow-y-auto ' +
           (modal === 'server_settings' || modal === 'user_settings'
             ? 'w-full max-w-4xl'
             : modal === 'channel_perms'
